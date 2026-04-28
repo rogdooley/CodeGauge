@@ -6,6 +6,7 @@ from pathlib import Path
 from codegauge.domain.models import Finding
 from codegauge.domain.models import Language, Project
 from codegauge.parsers.base import ScannerParser
+from codegauge.parsers.base import FindingPathInvalidError
 from codegauge.scanners.base import Scanner
 from codegauge.services.parser_registry import ParserRegistry
 from codegauge.services.scan_orchestrator import ScanOrchestrator
@@ -38,6 +39,14 @@ class CommandParser(ScannerParser):
 
     def parse(self, stdout: str, stderr: str, project_path: Path) -> list[Finding]:
         return []
+
+
+class BrokenPathParser(ScannerParser):
+    parser_name = "broken_path_parser"
+    supported_scanners = ("command",)
+
+    def parse(self, stdout: str, stderr: str, project_path: Path) -> list[Finding]:
+        raise FindingPathInvalidError("bad path", raw_payload={"file": "../../etc/passwd"})
 
 
 def test_scan_orchestrator_runs(tmp_path: Path) -> None:
@@ -103,3 +112,16 @@ def test_missing_parser_fails_closed(tmp_path: Path) -> None:
     assert results[0].metadata["scanner_name"] == "command"
     assert results[0].metadata["expected_parser"] == "command_parser"
     assert "Register parser" in (results[0].metadata["remediation"] or "")
+
+
+def test_invalid_finding_isolated_as_parser_finding(tmp_path: Path) -> None:
+    scanner = CommandScanner([sys.executable, "-c", "print('[]')"])
+    registry = ScannerRegistry([scanner])
+    orchestrator = ScanOrchestrator(registry, ParserRegistry([BrokenPathParser()]))
+    results = orchestrator.run(_project(tmp_path))
+    assert len(results) == 1
+    assert results[0].success is True
+    assert results[0].error_code is None
+    assert results[0].metadata["invalid_finding_count"] == 1
+    assert len(results[0].findings) == 1
+    assert results[0].findings[0].rule_id == "CODEGAUGE.PARSER.INVALID_PATH"

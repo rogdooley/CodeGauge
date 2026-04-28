@@ -25,6 +25,7 @@ class Category(str, Enum):
     complexity = "complexity"
     dead_code = "dead_code"
     coverage = "coverage"
+    system_parser = "system/parser"
 
 
 class Language(str, Enum):

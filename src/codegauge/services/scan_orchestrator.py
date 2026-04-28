@@ -5,6 +5,7 @@ from typing import Sequence
 
 from ..domain.models import ScanResult, Project
 from ..parsers import FindingPathInvalidError, ScannerOutputInvalidError, ScannerParseError
+from .report_normalizer import parser_finding
 from .parser_registry import ParserRegistry
 from .scanner_registry import ScannerRegistry
 
@@ -90,19 +91,51 @@ class ScanOrchestrator:
                         findings = list(parser.parse(command_result.stdout, command_result.stderr, project.path))
                         parsed_metadata = parser.parse_metadata(command_result.stdout, command_result.stderr, project.path)
                     except FindingPathInvalidError as exc:
-                        parse_error = str(exc)
-                        parse_error_code = "finding_path_invalid"
+                        parse_error = None
+                        parse_error_code = None
                         invalid_finding_payload = exc.raw_payload
                         invalid_finding_count = 1
+                        findings = [
+                            parser_finding(
+                                tool=scanner.scanner_name,
+                                rule_id="CODEGAUGE.PARSER.INVALID_PATH",
+                                message=f"invalid finding path from scanner '{scanner.scanner_name}'",
+                                raw_payload=exc.raw_payload,
+                            )
+                        ]
                     except ScannerOutputInvalidError as exc:
-                        parse_error = str(exc)
-                        parse_error_code = "scanner_output_invalid"
+                        parse_error = None
+                        parse_error_code = None
+                        invalid_finding_count = 1
+                        findings = [
+                            parser_finding(
+                                tool=scanner.scanner_name,
+                                rule_id="CODEGAUGE.PARSER.SCHEMA_ERROR",
+                                message=f"scanner output invalid for '{scanner.scanner_name}': {exc}",
+                            )
+                        ]
                     except ScannerParseError as exc:
-                        parse_error = f"scanner output parsing failed: {exc}"
-                        parse_error_code = "scanner_parse_error"
+                        parse_error = None
+                        parse_error_code = None
+                        invalid_finding_count = 1
+                        findings = [
+                            parser_finding(
+                                tool=scanner.scanner_name,
+                                rule_id="CODEGAUGE.PARSER.UNHANDLED",
+                                message=f"scanner output parsing failed for '{scanner.scanner_name}': {exc}",
+                            )
+                        ]
                     except Exception as exc:
-                        parse_error = f"scanner output parsing failed: {exc}"
-                        parse_error_code = "scanner_parse_error"
+                        parse_error = None
+                        parse_error_code = None
+                        invalid_finding_count = 1
+                        findings = [
+                            parser_finding(
+                                tool=scanner.scanner_name,
+                                rule_id="CODEGAUGE.PARSER.UNHANDLED",
+                                message=f"unexpected parser failure for '{scanner.scanner_name}': {exc}",
+                            )
+                        ]
 
             error = command_result.error or parse_error
             error_code = command_result.error_code or parse_error_code
