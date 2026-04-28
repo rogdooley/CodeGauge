@@ -94,6 +94,13 @@ def test_scan_json_output_shape(tmp_path: Path) -> None:
     assert payload["project"] == "proj3"
     assert payload["scanner_count"] == 1
     assert "duration_ms" in payload
+    assert payload["schema_version"] == "2.0.0"
+    assert payload["fingerprint_version"] == "1"
+    assert payload["message_normalizer_version"] == "1"
+    assert "report_sha256" in payload
+    assert "parser_summary" in payload
+    assert "global" in payload["parser_summary"]
+    assert "per_scanner" in payload["parser_summary"]
     assert "finding_count" in payload
     assert "invalid_findings" in payload
     assert "invalid_paths" in payload

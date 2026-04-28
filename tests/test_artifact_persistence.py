@@ -48,11 +48,28 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     assert (latest / "summary.json").exists()
 
     summary_payload = json.loads((scan_dir / "summary.json").read_text())
+    findings_payload = json.loads((scan_dir / "findings.json").read_text())
     policy_payload = json.loads((scan_dir / "policy.json").read_text())
     score_payload = json.loads((scan_dir / "score.json").read_text())
 
     assert summary_payload["project"] == "artifact-project"
     assert "score_card" in summary_payload
     assert "policy" in summary_payload
+    assert "inventory" in summary_payload
+    assert "policy_resolution" in summary_payload
+    assert "parser_summary" in summary_payload
+    assert "report_sha256" in summary_payload
     assert "status" in policy_payload
     assert "overall_score" in score_payload
+    if findings_payload:
+        first = findings_payload[0]
+        for required in (
+            "tool",
+            "rule_id",
+            "native_severity",
+            "severity",
+            "ownership",
+            "ownership_confidence",
+            "fingerprint",
+        ):
+            assert required in first

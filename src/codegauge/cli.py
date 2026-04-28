@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,12 @@ from .policy import CodeGaugePolicyEngine, PolicyStatus
 from .reporting import StaticSiteBuilder
 from .scoring import CodeGaugeScoringEngine
 from .services.metrics import MetricsExtractor, finding_fingerprint
+from .services.report_normalizer import (
+    FINGERPRINT_VERSION,
+    MESSAGE_NORMALIZER_VERSION,
+    finding_sort_key,
+    normalize_finding_record,
+)
 from .services.parser_registry import ParserRegistry
 from .services.scanner_registry import ScannerRegistry
 from .storage import ScanArtifactStore
@@ -217,6 +224,11 @@ def scan(
         "--fail-on-policy",
         help="Set process exit code from policy status: pass=0, warn=1, fail=2, internal errors=3.",
     ),
+    capture_full_raw: bool = typer.Option(
+        False,
+        "--capture-full-raw",
+        help="Capture full unredacted raw payload (requires payload.capture_full_raw=true in config).",
+    ),
 ) -> None:
     try:
         services = build_scan_services(path)
@@ -278,11 +290,73 @@ def scan(
         )
         summary = pre_policy_summary.model_copy(update={"policy": policy.model_dump(mode="json")})
         summary_payload = summary.model_dump(mode="json")
-        findings_payload = [
-            finding.model_dump(mode="json")
-            for result in results
-            for finding in result.findings
-        ]
+        payload_cfg = services.config.payload
+        allow_full_payload = bool(capture_full_raw and payload_cfg.capture_full_raw)
+        remaining_payload_bytes = int(payload_cfg.max_bytes_global)
+        findings_payload: list[dict[str, object]] = []
+        for result in results:
+            for finding in result.findings:
+                normalized, used = normalize_finding_record(
+                    finding,
+                    capture_full_raw=allow_full_payload,
+                    redact_payload=payload_cfg.redact,
+                    max_bytes_per_finding=payload_cfg.max_bytes_per_finding,
+                    remaining_global_bytes=remaining_payload_bytes,
+                )
+                findings_payload.append(normalized)
+                remaining_payload_bytes = max(0, remaining_payload_bytes - used)
+        findings_payload.sort(key=finding_sort_key)
+        parser_summary_global = {
+            "CODEGAUGE.PARSER.MISSING_RULE_ID": 0,
+            "CODEGAUGE.PARSER.INVALID_PATH": 0,
+            "CODEGAUGE.PARSER.BAD_SEVERITY": 0,
+            "CODEGAUGE.PARSER.SCHEMA_ERROR": 0,
+            "CODEGAUGE.PARSER.OVERSIZE_PAYLOAD": 0,
+            "CODEGAUGE.PARSER.UNHANDLED": 0,
+        }
+        parser_summary_scanners: dict[str, dict[str, int]] = {}
+        for finding in findings_payload:
+            if str(finding.get("category")) != "system/parser":
+                continue
+            rule_id = str(finding.get("rule_id"))
+            parser_summary_global.setdefault(rule_id, 0)
+            parser_summary_global[rule_id] += 1
+            scanner_name = str(finding.get("symbol") or "unknown")
+            bucket = parser_summary_scanners.setdefault(scanner_name, dict(parser_summary_global))
+            bucket.setdefault(rule_id, 0)
+            bucket[rule_id] += 1
+        for scanner_name, bucket in parser_summary_scanners.items():
+            for key in parser_summary_global.keys():
+                bucket.setdefault(key, 0)
+            parser_summary_scanners[scanner_name] = dict(sorted(bucket.items()))
+        inventory = dict(project.metadata.get("inventory", {})) if isinstance(project.metadata, dict) else {}
+        policy_resolution = dict(project.metadata.get("policy_resolution", {})) if isinstance(project.metadata, dict) else {}
+        summary_payload["schema_version"] = "2.0.0"
+        summary_payload["fingerprint_version"] = FINGERPRINT_VERSION
+        summary_payload["message_normalizer_version"] = MESSAGE_NORMALIZER_VERSION
+        summary_payload["parser_summary"] = {
+            "global": dict(sorted(parser_summary_global.items())),
+            "per_scanner": dict(sorted(parser_summary_scanners.items())),
+        }
+        summary_payload["inventory"] = inventory
+        summary_payload["policy_resolution"] = policy_resolution
+        summary_payload["payload_debug_mode"] = {
+            "capture_full_raw_config": payload_cfg.capture_full_raw,
+            "capture_full_raw_cli": capture_full_raw,
+            "capture_full_raw_effective": allow_full_payload,
+            "redact_effective": False if allow_full_payload else payload_cfg.redact,
+            "warning": (
+                "full raw payload capture enabled; sensitive data may be present"
+                if allow_full_payload
+                else None
+            ),
+        }
+        report_material = json.dumps(
+            {"summary": summary_payload, "findings": findings_payload},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        summary_payload["report_sha256"] = hashlib.sha256(report_material.encode("utf-8")).hexdigest()
         raw_outputs = {
             result.scanner_name: _compact_scanner_raw_output(result)
             for result in results
@@ -301,10 +375,9 @@ def scan(
         raise typer.Exit(code=3) from exc
 
     if json_output:
-        payload = summary_payload if verbose else summary.model_dump(mode="json", exclude_none=True)
-        if not verbose:
-            for entry in payload["results"]:
-                entry.setdefault("error_code", None)
+        payload = dict(summary_payload)
+        for entry in payload["results"]:
+            entry.setdefault("error_code", None)
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         typer.echo(
