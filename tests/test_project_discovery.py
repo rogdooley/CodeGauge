@@ -55,6 +55,23 @@ def test_django_project_detected_with_framework_metadata(tmp_path: Path) -> None
     assert django_meta["profile"]["cache_behavior"] == "stateless"
 
 
+def test_fastapi_style_settings_file_does_not_trigger_django_detection(tmp_path: Path) -> None:
+    proj = tmp_path / "fastapi-proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text(
+        "[project]\nname='fastapi-proj'\nversion='0.1.0'\ndependencies=['fastapi','uvicorn']\n"
+    )
+    settings = proj / "src" / "config" / "settings.py"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text("DEBUG = True\nAPP_ENV = 'dev'\n")
+    app_py = proj / "src" / "main.py"
+    app_py.write_text("from fastapi import FastAPI\napp = FastAPI()\n")
+
+    project = ProjectDiscoveryService().discover(proj)
+    assert Language.python in project.language_hints
+    assert project.metadata.get("django") is None
+
+
 def test_typescript_project_detected_with_framework_metadata(tmp_path: Path) -> None:
     proj = tmp_path / "ts-proj"
     proj.mkdir()

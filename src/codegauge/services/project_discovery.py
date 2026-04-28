@@ -40,6 +40,7 @@ _SPRING_ANNOTATION_PATTERNS: dict[str, re.Pattern[str]] = {
 
 _DRF_RE = re.compile(r"\b(rest_framework|from\s+rest_framework|import\s+rest_framework)\b", re.IGNORECASE)
 _CHANNELS_RE = re.compile(r"\b(channels|daphne|asgi\.py|ProtocolTypeRouter)\b", re.IGNORECASE)
+_DJANGO_IMPORT_RE = re.compile(r"\b(from\s+django\b|import\s+django\b|django\.)", re.IGNORECASE)
 _DJANGO_SETTINGS_RE = re.compile(
     r"\b(DEBUG\s*=|ALLOWED_HOSTS\s*=|SECURE_[A-Z_]+\s*=|CSRF_COOKIE_SECURE\s*=|SESSION_COOKIE_SECURE\s*=)",
     re.IGNORECASE,
@@ -113,23 +114,34 @@ class ProjectDiscoveryService:
         settings_files = sorted(root.rglob("settings.py"))[:200]
         requirements = root / "requirements.txt"
         pyproject = root / "pyproject.toml"
+        py_sources = list(root.rglob("*.py"))[:2000]
         evidence: list[str] = []
 
-        if manage_py.exists() and self._contains_any(manage_py, ("django", "DJANGO_SETTINGS_MODULE")):
+        manage_has_django = manage_py.exists() and self._contains_any(manage_py, ("django", "DJANGO_SETTINGS_MODULE"))
+        deps_has_django = (
+            (requirements.exists() and self._contains_any(requirements, ("django",)))
+            or (pyproject.exists() and self._contains_any(pyproject, ("django",)))
+        )
+        imports_has_django = self._files_match(py_sources, _DJANGO_IMPORT_RE)
+
+        if manage_has_django:
             evidence.append("manage.py")
+        if deps_has_django and requirements.exists() and self._contains_any(requirements, ("django",)):
+            evidence.append("requirements.txt")
+        if deps_has_django and pyproject.exists() and self._contains_any(pyproject, ("django",)):
+            evidence.append("pyproject.toml")
+        if imports_has_django:
+            evidence.append("django_imports")
         if settings_files:
             evidence.append("settings.py")
-        if requirements.exists() and self._contains_any(requirements, ("django",)):
-            evidence.append("requirements.txt")
-        if pyproject.exists() and self._contains_any(pyproject, ("django",)):
-            evidence.append("pyproject.toml")
 
-        if not evidence:
+        # Fail closed for framework detection: settings.py by itself is not enough
+        # because many non-Django apps (e.g. FastAPI) use the same filename.
+        if not (manage_has_django or deps_has_django or imports_has_django):
             return None
 
         profile_spec = self.profile_registry.get("django")
         profile = DjangoProfile() if profile_spec is None else profile_spec
-        py_sources = list(root.rglob("*.py"))[:2000]
         html_templates = list(root.rglob("templates/**/*.html"))[:1000]
 
         drf_detected = self._files_match(py_sources, _DRF_RE)

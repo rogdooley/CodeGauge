@@ -43,6 +43,22 @@ def test_scan_runs_with_stub_scanners(tmp_path: Path) -> None:
     assert "Java cache:" not in result.stdout
 
 
+def test_scan_fails_closed_when_no_scanners_resolved(tmp_path: Path) -> None:
+    project = tmp_path / "empty_proj"
+    project.mkdir()
+    result = runner.invoke(app, ["scan", str(project)])
+    assert result.exit_code == 3
+    assert "no scanners resolved for project" in result.stderr
+
+
+def test_scan_json_fails_closed_when_no_scanners_resolved(tmp_path: Path) -> None:
+    project = tmp_path / "empty_proj_json"
+    project.mkdir()
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 3
+    assert "no scanners resolved for project" in result.stderr
+
+
 def test_scan_human_output_shows_java_cache_summary(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "proj2_java"
     project.mkdir()

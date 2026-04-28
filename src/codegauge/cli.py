@@ -230,6 +230,13 @@ def scan(
         project = services.project
         start = perf_counter()
         results = services.orchestrator.run(project)
+        if not results:
+            typer.echo(
+                f"scan execution failed: no scanners resolved for project '{project.name}'. "
+                "Run from a project root or adjust enabled_scanners/config.",
+                err=True,
+            )
+            raise typer.Exit(code=3)
         duration_ms = (perf_counter() - start) * 1000
         metrics_extractor = MetricsExtractor()
         deduped_results = metrics_extractor.dedupe_scan_results(results)
