@@ -1,0 +1,28 @@
+[defaults]
+severity = "medium"
+category = "lint"
+
+[severity_prefixes]
+SEC = "high"
+S = "high"
+"JAVA.SEC" = "high"
+"JAVA.INJ" = "high"
+"SPRING.SEC" = "high"
+"SPRING.ACT" = "high"
+CPLX = "medium"
+STYLE = "low"
+
+[category_prefixes]
+SEC = "security"
+S = "security"
+"JAVA.SEC" = "security"
+"JAVA.INJ" = "security"
+"SPRING.SEC" = "security"
+"SPRING.PERSIST" = "security"
+"SPRING.ACT" = "security"
+"SPRING.API" = "lint"
+"SPRING.VAL" = "maintainability"
+DEAD = "dead_code"
+CPLX = "complexity"
+MAINT = "maintainability"
+TYP = "typing"

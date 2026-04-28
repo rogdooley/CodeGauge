@@ -1,0 +1,35 @@
+# Global CodeGauge configuration
+reports_dir = "~/.local/share/codegauge/reports"
+site_dir = "~/.local/share/codegauge/site"
+default_timeout_seconds = 180
+exclude = ["**/.venv/**", "**/node_modules/**"]
+enabled_scanners = ["ruff", "pyright", "bandit", "opengrep"]
+disabled_scanners = []
+
+[thresholds]
+max_critical = 0
+max_high = 5
+min_overall_score = 80
+min_security_score = 85
+min_coverage_percent = 70
+max_complexity_grade = "C"
+
+[scanners.ruff]
+enabled = true
+timeout_seconds = 90
+extra_args = ["--respect-gitignore"]
+
+[scanners.pyright]
+enabled = true
+timeout_seconds = 120
+extra_args = []
+
+[scanners.bandit]
+enabled = true
+timeout_seconds = 120
+extra_args = ["-x", "tests"]
+
+[scanners.opengrep]
+enabled = true
+timeout_seconds = 180
+extra_args = []

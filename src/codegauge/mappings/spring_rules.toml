@@ -1,0 +1,24 @@
+[defaults]
+severity = "medium"
+category = "maintainability"
+
+[severity_prefixes]
+"SPRING.SEC" = "high"
+"SPRING.VAL" = "medium"
+"SPRING.PERSIST" = "high"
+"SPRING.API" = "medium"
+"SPRING.ACT" = "high"
+
+[category_prefixes]
+"SPRING.SEC" = "security"
+"SPRING.VAL" = "maintainability"
+"SPRING.PERSIST" = "security"
+"SPRING.API" = "lint"
+"SPRING.ACT" = "security"
+
+[posture_prefixes]
+"SPRING.SEC" = "security_posture"
+"SPRING.VAL" = "validation_hygiene"
+"SPRING.PERSIST" = "persistence_safety"
+"SPRING.API" = "api_contract_hygiene"
+"SPRING.ACT" = "actuator_exposure"

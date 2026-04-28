@@ -1,0 +1,100 @@
+from pathlib import Path
+
+from codegauge.services.project_discovery import ProjectDiscoveryService
+from codegauge.domain.models import Language
+
+
+def test_python_project_detected(tmp_path: Path) -> None:
+    proj = tmp_path / "myproj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("")
+    svc = ProjectDiscoveryService()
+    project = svc.discover(proj)
+    assert Language.python in project.language_hints
+
+
+def test_java_project_detected_with_framework_metadata(tmp_path: Path) -> None:
+    proj = tmp_path / "javaproj"
+    proj.mkdir()
+    (proj / "pom.xml").write_text("<project><dependencies><dependency>org.springframework.boot</dependency></dependencies></project>")
+    src = proj / "src" / "main" / "java" / "App.java"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("@RestController\nclass App {}")
+
+    svc = ProjectDiscoveryService()
+    project = svc.discover(proj)
+    assert Language.java in project.language_hints
+    java_meta = project.metadata.get("java")
+    assert isinstance(java_meta, dict)
+    assert java_meta["module_count"] >= 1
+    assert "spring_boot" in java_meta["frameworks"]
+    assert "spring" in java_meta["frameworks"]
+
+
+def test_django_project_detected_with_framework_metadata(tmp_path: Path) -> None:
+    proj = tmp_path / "django-proj"
+    proj.mkdir()
+    (proj / "manage.py").write_text("import django\n")
+    settings = proj / "app" / "settings.py"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text("DEBUG = True\nALLOWED_HOSTS = []\n")
+    views = proj / "app" / "views.py"
+    views.write_text("from rest_framework.views import APIView\n")
+    asgi = proj / "app" / "asgi.py"
+    asgi.write_text("from channels.routing import ProtocolTypeRouter\n")
+
+    project = ProjectDiscoveryService().discover(proj)
+    assert Language.python in project.language_hints
+    django_meta = project.metadata.get("django")
+    assert isinstance(django_meta, dict)
+    assert django_meta["detected"] is True
+    assert django_meta["drf"] is True
+    assert django_meta["channels"] is True
+    assert "django_check_deploy" in django_meta["profile"]["scanners"]
+    assert "framework_cards" in django_meta["profile"]["cards"]
+    assert django_meta["profile"]["cache_behavior"] == "stateless"
+
+
+def test_typescript_project_detected_with_framework_metadata(tmp_path: Path) -> None:
+    proj = tmp_path / "ts-proj"
+    proj.mkdir()
+    (proj / "package.json").write_text(
+        '{"name":"x","dependencies":{"react":"18.0.0"},"devDependencies":{"typescript":"5.0.0"}}'
+    )
+    (proj / "tsconfig.json").write_text('{"compilerOptions":{"strict":true}}')
+    src = proj / "src" / "app.tsx"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("export const App = () => null;\n")
+
+    project = ProjectDiscoveryService().discover(proj)
+    assert Language.typescript in project.language_hints
+    assert Language.javascript in project.language_hints
+    ts_meta = project.metadata.get("typescript")
+    assert isinstance(ts_meta, dict)
+    assert "react" in ts_meta["frameworks"]
+    assert "typescript_diagnostics" in ts_meta["profile"]["scanners"]
+    assert ts_meta["profile"]["cache_behavior"] == "partial"
+
+
+def test_infrastructure_project_detected_with_metadata(tmp_path: Path) -> None:
+    proj = tmp_path / "infra-proj"
+    proj.mkdir()
+    (proj / "Dockerfile").write_text("FROM alpine\n")
+    (proj / "docker-compose.yml").write_text("services:\n  web:\n    image: nginx\n")
+    (proj / "web.container").write_text("[Container]\nImage=nginx\n")
+    (proj / "nginx.conf").write_text("events {}\nhttp {}\n")
+    (proj / "main.tf").write_text('resource "x" "y" {}\n')
+    scripts = proj / "scripts" / "deploy.sh"
+    scripts.parent.mkdir(parents=True, exist_ok=True)
+    scripts.write_text("#!/bin/sh\necho ok\n")
+
+    project = ProjectDiscoveryService().discover(proj)
+    assert Language.general in project.language_hints
+    infra_meta = project.metadata.get("infrastructure")
+    assert isinstance(infra_meta, dict)
+    assert infra_meta["detected"] is True
+    assert "containers" in infra_meta["frameworks"]
+    assert "reverse_proxy" in infra_meta["frameworks"]
+    assert "terraform" in infra_meta["frameworks"]
+    assert "shell" in infra_meta["frameworks"]
+    assert "dockerfile_scan" in infra_meta["profile"]["scanners"]

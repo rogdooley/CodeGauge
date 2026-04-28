@@ -1,0 +1,27 @@
+[defaults]
+severity = "medium"
+category = "lint"
+
+[severity_prefixes]
+S = "high"
+SEC = "high"
+F821 = "high"
+F823 = "high"
+F824 = "high"
+F82 = "high"
+I = "low"
+W = "low"
+D = "low"
+Q = "low"
+COM = "low"
+ISC = "low"
+
+[category_prefixes]
+S = "security"
+SEC = "security"
+F401 = "dead_code"
+F841 = "dead_code"
+ERA = "dead_code"
+C90 = "maintainability"
+PLR = "maintainability"
+SIM = "maintainability"

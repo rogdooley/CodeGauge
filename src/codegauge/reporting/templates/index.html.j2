@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeGauge Reports</title>
+    <style>
+      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
+      h1 { margin-bottom: 1rem; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }
+      th { background: #f3f4f6; }
+      .status-fail { color: #b91c1c; font-weight: 600; }
+      .status-warn { color: #92400e; font-weight: 600; }
+      .status-pass { color: #166534; font-weight: 600; }
+      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>CodeGauge Leadership Summary</h1>
+    <section>
+      <h2>Executive Summary</h2>
+      <table>
+        <tbody>
+          <tr><th>Project Count</th><td>{{ summary.project_count }}</td></tr>
+          <tr><th>PASS / WARN / FAIL</th><td>{{ summary.pass_count }} / {{ summary.warn_count }} / {{ summary.fail_count }}</td></tr>
+          <tr><th>Average Score</th><td>{% if summary.average_score is not none %}{{ "%.2f"|format(summary.average_score) }}{% else %}n/a{% endif %}</td></tr>
+          <tr>
+            <th>Worst Project</th>
+            <td>
+              {% if summary.worst_project %}
+                {{ summary.worst_project.project }} ({{ "%.2f"|format(summary.worst_project.score) }}/{{ summary.worst_project.grade }}, {{ summary.worst_project.policy_status|upper }})
+              {% else %}
+                n/a
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Most Improved Project</th>
+            <td>
+              {% if summary.most_improved_project %}
+                {{ summary.most_improved_project.project }} ({{ "%+.2f"|format(summary.most_improved_project.trend_delta) }})
+              {% else %}
+                n/a
+              {% endif %}
+            </td>
+          </tr>
+          <tr><th>Cache Hits</th><td>{{ summary.cache_hits }}</td></tr>
+          <tr><th>Cache Misses</th><td>{{ summary.cache_misses }}</td></tr>
+          <tr><th>Cache Hit Rate</th><td>{% if summary.cache_hit_rate is not none %}{{ "%.2f"|format(summary.cache_hit_rate) }}%{% else %}n/a{% endif %}</td></tr>
+          <tr><th>Python Cache Efficiency</th><td>{% if summary.language_cache_efficiency.python is not none %}{{ "%.2f"|format(summary.language_cache_efficiency.python) }}%{% else %}n/a{% endif %}</td></tr>
+          <tr><th>Java Cache Efficiency</th><td>{% if summary.language_cache_efficiency.java is not none %}{{ "%.2f"|format(summary.language_cache_efficiency.java) }}%{% else %}n/a{% endif %}</td></tr>
+          <tr><th>JavaScript Cache Efficiency</th><td>{% if summary.language_cache_efficiency.javascript is not none %}{{ "%.2f"|format(summary.language_cache_efficiency.javascript) }}%{% else %}n/a{% endif %}</td></tr>
+          <tr><th>Django Cache Efficiency</th><td>{% if summary.language_cache_efficiency.django is not none %}{{ "%.2f"|format(summary.language_cache_efficiency.django) }}%{% else %}n/a{% endif %}</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Score</th>
+          <th>Grade</th>
+          <th>Policy</th>
+          <th>Reason Codes</th>
+          <th>Trend Delta</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in projects %}
+        <tr>
+          <td><a href="projects/{{ row.project }}.html">{{ row.project }}</a></td>
+          <td>{{ "%.2f"|format(row.score) }}</td>
+          <td>{{ row.grade }}</td>
+          <td class="status-{{ row.policy_status }}">{{ row.policy_status|upper }}</td>
+          <td class="mono">
+            {% if row.policy_status in ["warn", "fail"] %}
+              {{ row.reason_codes|join(", ") }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            {% if row.trend_delta is not none %}
+              {{ "%+.2f"|format(row.trend_delta) }}
+            {% else %}
+              n/a
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>

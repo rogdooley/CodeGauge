@@ -1,0 +1,19 @@
+[defaults]
+severity = "medium"
+category = "security"
+
+[severity_prefixes]
+"INF.SEC" = "high"
+"INF.EXPOSURE" = "high"
+"INF.SECRETS" = "high"
+"INF.ISOLATION" = "medium"
+"INF.IAC" = "medium"
+"INF.SHELL" = "low"
+
+[category_prefixes]
+"INF.SEC" = "security"
+"INF.EXPOSURE" = "security"
+"INF.SECRETS" = "security"
+"INF.ISOLATION" = "maintainability"
+"INF.IAC" = "maintainability"
+"INF.SHELL" = "lint"

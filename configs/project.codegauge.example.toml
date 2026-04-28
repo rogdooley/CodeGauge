@@ -1,0 +1,25 @@
+# Project-local overrides (<project>/.codegauge.toml)
+reports_dir = ".codegauge/reports"
+site_dir = ".codegauge/site"
+default_timeout_seconds = 90
+exclude = ["build/**", "dist/**"]
+enabled_scanners = ["ruff", "bandit"]
+disabled_scanners = ["opengrep"]
+
+[thresholds]
+max_critical = 0
+max_high = 2
+min_overall_score = 85
+min_security_score = 90
+min_coverage_percent = 80
+max_complexity_grade = "B"
+
+[scanners.ruff]
+enabled = true
+timeout_seconds = 45
+extra_args = ["--select", "E,F,B"]
+
+[scanners.pyright]
+enabled = false
+timeout_seconds = 60
+extra_args = []

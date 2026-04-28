@@ -1,0 +1,18 @@
+[defaults]
+severity = "medium"
+category = "lint"
+
+[severity_prefixes]
+SEC = "high"
+INJ = "high"
+AUTH = "high"
+XSS = "high"
+
+[category_prefixes]
+SEC = "security"
+INJ = "security"
+AUTH = "security"
+XSS = "security"
+TS = "typing"
+PERF = "maintainability"
+DEAD = "dead_code"
