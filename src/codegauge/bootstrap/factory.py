@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import fnmatch
 
 from ..config import CodeGaugeConfig, load_config
 from ..domain.models import Project
@@ -170,6 +171,57 @@ def _apply_scanner_config(scanner_registry: ScannerRegistry, config: CodeGaugeCo
     return ScannerRegistry(scanner_registry.scanners, enabled_names=enabled, disabled_names=disabled)
 
 
+def _build_inventory(project_root: Path, excludes: list[str]) -> dict[str, int]:
+    files_seen = 0
+    first_party = 0
+    third_party = 0
+    generated = 0
+    excluded = 0
+    deny = set(excludes) | {".venv/**", ".git/**", ".pytest_cache/**", ".ruff_cache/**"}
+    for path in project_root.rglob("*"):
+        if not path.is_file():
+            continue
+        files_seen += 1
+        rel = path.relative_to(project_root).as_posix()
+        if any(fnmatch.fnmatch(rel, pattern) for pattern in deny):
+            excluded += 1
+            continue
+        low = rel.lower()
+        if any(x in low for x in ("node_modules/", "vendor/", "third_party/", ".venv/")):
+            third_party += 1
+        elif any(x in low for x in ("/generated/", "/dist/", "/build/", "_generated")):
+            generated += 1
+        else:
+            first_party += 1
+    return {
+        "files_seen": files_seen,
+        "first_party": first_party,
+        "third_party": third_party,
+        "generated": generated,
+        "excluded": excluded,
+    }
+
+
+def _resolve_policy(project: Project) -> tuple[str, set[str], dict[str, str]]:
+    disabled: dict[str, str] = {}
+    enabled: set[str] = set()
+    framework = "generic"
+    if isinstance(project.metadata.get("django"), dict):
+        framework = "django"
+        enabled.update({"django_check_deploy", "django_settings_scan", "django_template_scan", "django_orm_health"})
+    elif (project.path / "pyproject.toml").exists():
+        framework = "fastapi"
+        disabled.update(
+            {
+                "django_check_deploy": "framework_incompatible",
+                "django_settings_scan": "framework_incompatible",
+                "django_template_scan": "framework_incompatible",
+                "django_orm_health": "framework_incompatible",
+            }
+        )
+    return framework, enabled, disabled
+
+
 def load_resolved_config(project_path: Path) -> CodeGaugeConfig:
     scanner_registry = ScannerRegistry([])
     register_builtin_scanners(scanner_registry)
@@ -181,11 +233,26 @@ def build_scan_services(path: Path) -> ScanApplicationServices:
     project_path = path.expanduser().resolve()
     config = load_resolved_config(project_path)
     project = ProjectDiscoveryService(ProfileRegistry.with_builtins()).discover(project_path)
-    project = project.model_copy(update={"config": config.model_dump(mode="json")}, deep=True)
+    framework, policy_enabled, policy_disabled = _resolve_policy(project)
+    inventory = _build_inventory(project_path, config.exclude)
+    metadata = dict(project.metadata)
+    metadata["inventory"] = inventory
+    metadata["policy_resolution"] = {
+        "framework": framework,
+        "enabled": sorted(policy_enabled),
+        "disabled": dict(sorted(policy_disabled.items())),
+    }
+    project = project.model_copy(update={"config": config.model_dump(mode="json"), "metadata": metadata}, deep=True)
 
     scanner_registry = ScannerRegistry([])
     register_builtin_scanners(scanner_registry)
     scanner_registry = _apply_scanner_config(scanner_registry, config)
+    if policy_disabled:
+        scanner_registry = ScannerRegistry(
+            scanner_registry.scanners,
+            enabled_names=scanner_registry.enabled_names,
+            disabled_names=scanner_registry.disabled_names.union(policy_disabled.keys()),
+        )
 
     parser_registry = ParserRegistry()
     register_builtin_parsers(parser_registry)
