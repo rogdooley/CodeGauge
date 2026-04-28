@@ -23,6 +23,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "disabled_scanners": [],
     "scanners": {},
     "thresholds": {},
+    "payload": {},
 }
 
 

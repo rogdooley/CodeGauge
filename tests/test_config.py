@@ -12,6 +12,8 @@ def test_config_loads_defaults_for_project(tmp_path: Path) -> None:
     assert config.default_timeout_seconds == 120
     assert config.reports_dir == (tmp_path / ".codegauge/reports").resolve()
     assert config.site_dir == (tmp_path / ".codegauge/site").resolve()
+    assert config.payload.capture_full_raw is False
+    assert config.payload.redact is True
 
 
 def test_malformed_toml_fails_with_clear_error(tmp_path: Path) -> None:

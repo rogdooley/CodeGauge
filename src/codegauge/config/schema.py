@@ -78,6 +78,15 @@ class ThresholdConfig(BaseModel):
         return normalized
 
 
+class PayloadConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capture_full_raw: bool = False
+    redact: bool = True
+    max_bytes_per_finding: int = Field(default=16 * 1024, ge=1024)
+    max_bytes_global: int = Field(default=10 * 1024 * 1024, ge=1024)
+
+
 class CodeGaugeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -91,6 +100,7 @@ class CodeGaugeConfig(BaseModel):
     disabled_scanners: list[str] = Field(default_factory=list)
     scanners: dict[str, ScannerSettings] = Field(default_factory=dict)
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig)
+    payload: PayloadConfig = Field(default_factory=PayloadConfig)
 
     @field_validator("enabled_scanners", "disabled_scanners", mode="after")
     @classmethod
