@@ -14,6 +14,8 @@ from .constants import ExitCode, InternalErrorCode, ParserErrorCode, ScannerErro
 from .baseline import BaselineService
 from .bootstrap.factory import (
     build_scan_services,
+    build_scan_services_with_config,
+    load_resolved_config_with_overrides,
     load_resolved_config,
     register_builtin_parsers,
     register_builtin_scanners,
@@ -34,6 +36,7 @@ from .services.parser_registry import ParserRegistry
 from .services.scanner_registry import ScannerRegistry
 from .storage import ScanArtifactStore
 from .storage import JavaBuildCacheService
+from .paths import java_cache_root_for_project, open_in_browser
 
 app = typer.Typer()
 baseline_app = typer.Typer()
@@ -121,6 +124,36 @@ def _collect_java_cache_summary(results) -> dict[str, object]:
         "tools": sorted(tool_status.values(), key=lambda item: str(item["tool"])),
         "last_cache_update": last_cache_update,
     }
+
+
+def _summary_exit_code(results_payload, policy_status: PolicyStatus, *, policy_gate: bool) -> int:
+    scanner_failure = any(
+        row.error_code
+        in {
+            ScannerErrorCode.contract_violation,
+            ScannerErrorCode.binary_missing,
+            ScannerErrorCode.config_error,
+            ScannerErrorCode.nonzero_exit,
+            ScannerErrorCode.timeout,
+        }
+        for row in results_payload
+    )
+    parser_failure = any(
+        row.error_code in {ParserErrorCode.parser_missing, ParserErrorCode.parse_error, ParserErrorCode.output_invalid}
+        for row in results_payload
+    ) or any(int(row.metadata.get("invalid_finding_count", 0) or 0) > 0 for row in results_payload)
+    if scanner_failure:
+        return int(ExitCode.scanner_failure)
+    if parser_failure:
+        return int(ExitCode.parser_failure)
+    if policy_gate:
+        if policy_status == PolicyStatus.pass_:
+            return int(ExitCode.success)
+        if policy_status == PolicyStatus.warn:
+            return int(ExitCode.policy_warning)
+        if policy_status == PolicyStatus.fail:
+            return int(ExitCode.policy_fail)
+    return int(ExitCode.success)
 
 
 def _compact_scanner_raw_output(result) -> dict[str, object]:
@@ -220,6 +253,9 @@ def scan(
     path: Path,
     json_output: bool = typer.Option(False, "--json"),
     verbose: bool = typer.Option(False, "--verbose"),
+    report_root: Path | None = typer.Option(None, "--report-root"),
+    state_root: Path | None = typer.Option(None, "--state-root"),
+    open_report: bool | None = typer.Option(None, "--open/--no-open"),
     fail_on_policy: bool = typer.Option(
         False,
         "--fail-on-policy",
@@ -234,37 +270,19 @@ def scan(
         help="Capture full unredacted raw payload (requires payload.capture_full_raw=true in config).",
     ),
 ) -> None:
-    def _raise_scan_exit(results_payload, policy_status: PolicyStatus, *, policy_gate: bool) -> None:
-        scanner_failure = any(
-            row.error_code
-            in {
-                ScannerErrorCode.contract_violation,
-                ScannerErrorCode.binary_missing,
-                ScannerErrorCode.config_error,
-                ScannerErrorCode.nonzero_exit,
-                ScannerErrorCode.timeout,
-            }
-            for row in results_payload
-        )
-        parser_failure = any(
-            row.error_code in {ParserErrorCode.parser_missing, ParserErrorCode.parse_error, ParserErrorCode.output_invalid}
-            for row in results_payload
-        ) or any(int(row.metadata.get("invalid_finding_count", 0) or 0) > 0 for row in results_payload)
-        if scanner_failure:
-            raise typer.Exit(code=int(ExitCode.scanner_failure))
-        if parser_failure:
-            raise typer.Exit(code=int(ExitCode.parser_failure))
-        if policy_gate:
-            if policy_status == PolicyStatus.pass_:
-                raise typer.Exit(code=int(ExitCode.success))
-            if policy_status == PolicyStatus.warn:
-                raise typer.Exit(code=int(ExitCode.policy_warning))
-            if policy_status == PolicyStatus.fail:
-                raise typer.Exit(code=int(ExitCode.policy_fail))
-        raise typer.Exit(code=int(ExitCode.success))
-
+    resolved_path = path.expanduser().resolve()
     try:
-        services = build_scan_services(path)
+        resolved_config = load_resolved_config_with_overrides(
+            resolved_path,
+            report_root=report_root,
+            state_root=state_root,
+            open_report=open_report,
+        )
+        resolved_config.state_root.mkdir(parents=True, exist_ok=True)
+        (resolved_config.state_root / "cache").mkdir(parents=True, exist_ok=True)
+        (resolved_config.state_root / "logs").mkdir(parents=True, exist_ok=True)
+        (resolved_config.state_root / "tmp").mkdir(parents=True, exist_ok=True)
+        services = build_scan_services_with_config(resolved_path, resolved_config)
     except ConfigLoadError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=int(ExitCode.config_error)) from exc
@@ -276,6 +294,14 @@ def scan(
     except Exception as exc:
         typer.echo(f"scan execution failed: {exc}", err=True)
         raise typer.Exit(code=int(ExitCode.internal_error)) from exc
+
+    legacy_root = resolved_path / ".codegauge"
+    if legacy_root.exists():
+        typer.echo(
+            f"Notice: legacy local storage at {legacy_root} is deprecated; new artifacts are written to {services.config.report_root}",
+            err=True,
+        )
+
     try:
         project = services.project
         start = perf_counter()
@@ -408,8 +434,8 @@ def scan(
             result.scanner_name: _compact_scanner_raw_output(result)
             for result in results
         }
-        store = ScanArtifactStore(services.config.reports_dir)
-        store.persist_scan_artifacts(
+        store = ScanArtifactStore(services.config.report_root)
+        persisted = store.persist_scan_artifacts(
             project_name=project.name,
             summary=summary_payload,
             findings=findings_payload,
@@ -417,6 +443,32 @@ def scan(
             policy=summary.policy or {},
             scanner_raw_outputs=raw_outputs,
         )
+        builder = StaticSiteBuilder(report_root=services.config.report_root)
+        report_template = builder.environment.get_template("project.html.j2")
+        report_html = report_template.render(
+            project=project.name,
+            latest={"summary": summary_payload, "score": summary.score_card or {}, "policy": summary.policy or {}},
+            runs=[
+                {
+                    "scan_id": persisted.run_dir.name,
+                    "generated_local": datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+                    "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    "policy_status": (summary.policy or {}).get("status", "unknown"),
+                    "reason_codes": (summary.policy or {}).get("reasons", []),
+                    "overall_score": float((summary.score_card or {}).get("overall_score", 0.0) or 0.0),
+                    "grade": (summary.score_card or {}).get("grade"),
+                    "critical": sum(1 for f in findings_payload if str(f.get("severity")) == "critical"),
+                    "high": sum(1 for f in findings_payload if str(f.get("severity")) == "high"),
+                    "medium": sum(1 for f in findings_payload if str(f.get("severity")) == "medium"),
+                    "low": sum(1 for f in findings_payload if str(f.get("severity")) == "low"),
+                    "report_link": "report.html",
+                    "summary_link": "summary.json",
+                    "findings_link": "findings.json",
+                }
+            ],
+        )
+        (persisted.run_dir / "report.html").write_text(report_html, encoding="utf-8")
+        builder.build()
     except typer.Exit:
         raise
     except Exception as exc:
@@ -458,25 +510,52 @@ def scan(
                 typer.echo(f"Miss reasons: {compact}")
         if summary.policy["status"] in {"warn", "fail"}:
             typer.echo(f"Policy reasons: {', '.join(summary.policy['reasons'])}")
+        typer.echo(f"Report portal: {services.config.report_root / 'index.html'}")
+
+    should_open = bool(open_report if open_report is not None else services.config.open_report)
+    if should_open:
+        opened, message = open_in_browser(services.config.report_root / "index.html")
+        if opened:
+            typer.echo(message)
+        else:
+            typer.echo(f"Info: {message}", err=True)
 
     if fail_on_policy:
-        _raise_scan_exit(results, policy.status, policy_gate=True)
-    _raise_scan_exit(results, policy.status, policy_gate=False)
+        raise typer.Exit(code=_summary_exit_code(results, policy.status, policy_gate=True))
+    raise typer.Exit(code=_summary_exit_code(results, policy.status, policy_gate=False))
 
 
 @app.command("build-site")
-def build_site(path: Path = typer.Argument(Path.cwd())) -> None:
+def build_site(
+    path: Path = typer.Argument(Path.cwd()),
+    report_root: Path | None = typer.Option(None, "--report-root"),
+    state_root: Path | None = typer.Option(None, "--state-root"),
+    open_report: bool | None = typer.Option(None, "--open/--no-open"),
+) -> None:
     try:
-        services = build_scan_services(path)
-        builder = StaticSiteBuilder(reports_root=services.config.reports_dir, site_root=services.config.site_dir)
+        resolved_path = path.expanduser().resolve()
+        config = load_resolved_config_with_overrides(
+            resolved_path,
+            report_root=report_root,
+            state_root=state_root,
+            open_report=open_report,
+        )
+        builder = StaticSiteBuilder(report_root=config.report_root)
         output = builder.build()
     except ConfigLoadError as exc:
         raise typer.BadParameter(str(exc)) from exc
     except Exception as exc:
         typer.echo(f"site build failed: {exc}", err=True)
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=int(ExitCode.internal_error)) from exc
 
     typer.echo(f"Built site for {output['project_count']} projects at {output['output_dir']}")
+    should_open = bool(open_report if open_report is not None else config.open_report)
+    if should_open:
+        opened, message = open_in_browser(config.report_root / "index.html")
+        if opened:
+            typer.echo(message)
+        else:
+            typer.echo(f"Info: {message}", err=True)
 
 
 @app.command("prune-reports")
@@ -485,6 +564,8 @@ def prune_reports(
     keep: int | None = typer.Option(None, "--keep", min=1),
     days: int | None = typer.Option(None, "--days", min=1),
     project: list[str] | None = typer.Option(None, "--project"),
+    report_root: Path | None = typer.Option(None, "--report-root"),
+    state_root: Path | None = typer.Option(None, "--state-root"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     if (keep is None and days is None) or (keep is not None and days is not None):
@@ -492,11 +573,16 @@ def prune_reports(
         raise typer.Exit(code=3)
 
     try:
-        config = load_resolved_config(path.expanduser().resolve())
+        config = load_resolved_config_with_overrides(
+            path.expanduser().resolve(),
+            report_root=report_root,
+            state_root=state_root,
+            open_report=None,
+        )
     except ConfigLoadError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    store = ScanArtifactStore(config.reports_dir)
+    store = ScanArtifactStore(config.report_root)
     projects = store.list_projects()
     requested_projects = project or []
     if requested_projects:
@@ -621,8 +707,9 @@ def show_config(path: Path = typer.Argument(Path.cwd()), human: bool = False) ->
         raise typer.BadParameter(str(exc)) from exc
 
     if human:
-        typer.echo(f"reports_dir: {config.reports_dir}")
-        typer.echo(f"site_dir: {config.site_dir}")
+        typer.echo(f"report_root: {config.report_root}")
+        typer.echo(f"state_root: {config.state_root}")
+        typer.echo(f"open_report: {config.open_report}")
         typer.echo(f"default_timeout_seconds: {config.default_timeout_seconds}")
         typer.echo(f"enabled_scanners: {', '.join(config.enabled_scanners) or '(all)'}")
         typer.echo(f"disabled_scanners: {', '.join(config.disabled_scanners) or '(none)'}")
@@ -639,12 +726,15 @@ def show_config(path: Path = typer.Argument(Path.cwd()), human: bool = False) ->
 @cache_app.command("status")
 def cache_status(
     project_path: Path = typer.Argument(Path.cwd()),
+    state_root: Path | None = typer.Option(None, "--state-root"),
     module: str | None = typer.Option(None, "--module"),
     tool: str | None = typer.Option(None, "--tool"),
     json_output: bool = typer.Option(True, "--json/--human"),
 ) -> None:
     project_root = project_path.expanduser().resolve()
-    service = JavaBuildCacheService(project_root)
+    config = load_resolved_config_with_overrides(project_root, state_root=state_root)
+    config.state_root.mkdir(parents=True, exist_ok=True)
+    service = JavaBuildCacheService(project_root, cache_root=java_cache_root_for_project(config.state_root, project_root))
     status = service.status()
     if module is not None:
         filtered = [entry for entry in status["modules"] if entry["module_name"] == module]
@@ -680,12 +770,15 @@ def cache_status(
 @cache_app.command("clear")
 def cache_clear(
     project_path: Path = typer.Argument(Path.cwd()),
+    state_root: Path | None = typer.Option(None, "--state-root"),
     module: str | None = typer.Option(None, "--module"),
     tool: str | None = typer.Option(None, "--tool"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     project_root = project_path.expanduser().resolve()
-    service = JavaBuildCacheService(project_root)
+    config = load_resolved_config_with_overrides(project_root, state_root=state_root)
+    config.state_root.mkdir(parents=True, exist_ok=True)
+    service = JavaBuildCacheService(project_root, cache_root=java_cache_root_for_project(config.state_root, project_root))
     if module is not None:
         module_names = {entry["module_name"] for entry in service.status()["modules"]}
         if module not in module_names:
@@ -703,6 +796,7 @@ def cache_clear(
 @cache_app.command("prune")
 def cache_prune(
     project_path: Path = typer.Argument(Path.cwd()),
+    state_root: Path | None = typer.Option(None, "--state-root"),
     days: int = typer.Option(30, "--days", min=1),
     max_history: int = typer.Option(10, "--max-history", min=1),
     project: list[str] | None = typer.Option(None, "--project"),
@@ -711,7 +805,9 @@ def cache_prune(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     project_root = project_path.expanduser().resolve()
-    service = JavaBuildCacheService(project_root)
+    config = load_resolved_config_with_overrides(project_root, state_root=state_root)
+    config.state_root.mkdir(parents=True, exist_ok=True)
+    service = JavaBuildCacheService(project_root, cache_root=java_cache_root_for_project(config.state_root, project_root))
     status = service.status()
     current_project = str(status.get("project", project_root.name))
 
@@ -751,6 +847,8 @@ def cache_prune(
 @baseline_app.command("init")
 def baseline_init(
     project_path: Path,
+    report_root: Path | None = typer.Option(None, "--report-root"),
+    state_root: Path | None = typer.Option(None, "--state-root"),
     output: Path = typer.Option(Path("baseline.json"), "--output"),
     owner: str | None = typer.Option(None, "--owner"),
     note: str | None = typer.Option(None, "--note"),
@@ -759,7 +857,13 @@ def baseline_init(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     try:
-        services = build_scan_services(project_path)
+        resolved_project = project_path.expanduser().resolve()
+        resolved_config = load_resolved_config_with_overrides(
+            resolved_project,
+            report_root=report_root,
+            state_root=state_root,
+        )
+        services = build_scan_services_with_config(resolved_project, resolved_config)
     except ConfigLoadError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=3) from exc
@@ -818,3 +922,31 @@ def baseline_init(
         f"Wrote baseline with {len(entries)} entries to {output_path} "
         f"(suppressed duplicates excluded: {int(dedupe_meta.get('suppressed_count', 0))})"
     )
+
+
+@app.command("open")
+def open_portal(
+    path: Path = typer.Argument(Path.cwd()),
+    report_root: Path | None = typer.Option(None, "--report-root"),
+    state_root: Path | None = typer.Option(None, "--state-root"),
+) -> None:
+    resolved_path = path.expanduser().resolve()
+    try:
+        config = load_resolved_config_with_overrides(
+            resolved_path,
+            report_root=report_root,
+            state_root=state_root,
+        )
+    except ConfigLoadError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    portal = config.report_root / "index.html"
+    if not portal.exists():
+        typer.echo(
+            f"No report portal found at {portal}. Run 'codegauge scan {resolved_path}' or 'codegauge build-site {resolved_path}' first."
+        )
+        raise typer.Exit(code=int(ExitCode.success))
+    opened, message = open_in_browser(portal)
+    if opened:
+        typer.echo(message)
+        return
+    typer.echo(f"Info: {message}")

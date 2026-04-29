@@ -13,7 +13,7 @@ from typing import Any, Mapping, Sequence
 @dataclass(frozen=True)
 class PersistedScanPaths:
     project_dir: Path
-    scan_dir: Path
+    run_dir: Path
     latest_dir: Path
 
 
@@ -26,10 +26,10 @@ class ScanDirInfo:
 
 
 class ScanArtifactStore:
-    """Persist and query scan artifacts under reports/<project>/..."""
+    """Persist and query scan artifacts under report_root/projects/<project>/runs/..."""
 
-    def __init__(self, reports_root: Path) -> None:
-        self.reports_root = reports_root
+    def __init__(self, report_root: Path) -> None:
+        self.report_root = report_root
 
     def persist_scan_artifacts(
         self,
@@ -41,37 +41,59 @@ class ScanArtifactStore:
         policy: Mapping[str, Any],
         scanner_raw_outputs: Mapping[str, Mapping[str, Any]],
     ) -> PersistedScanPaths:
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        project_dir = self.reports_root / project_name
-        scans_root = project_dir / "scans"
-        scans_root.mkdir(parents=True, exist_ok=True)
-        scan_dir = self._allocate_scan_dir(scans_root, timestamp)
-        scan_dir.mkdir(parents=True, exist_ok=False)
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
+        project_dir = self.report_root / "projects" / project_name
+        runs_root = project_dir / "runs"
+        runs_root.mkdir(parents=True, exist_ok=True)
+        run_dir = self._allocate_scan_dir(runs_root, timestamp)
+        run_dir.mkdir(parents=True, exist_ok=False)
 
-        self._atomic_write_json(scan_dir / "summary.json", summary)
-        self._atomic_write_json(scan_dir / "findings.json", list(findings))
-        self._atomic_write_json(scan_dir / "score.json", score)
-        self._atomic_write_json(scan_dir / "policy.json", policy)
+        report_html = run_dir / "report.html"
+        self._atomic_write_json(run_dir / "summary.json", summary)
+        self._atomic_write_json(run_dir / "findings.json", list(findings))
+        self._atomic_write_json(run_dir / "score.json", score)
+        self._atomic_write_json(run_dir / "policy.json", policy)
 
-        raw_dir = scan_dir / "raw"
+        raw_dir = run_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         for scanner_name, payload in sorted(scanner_raw_outputs.items()):
             self._atomic_write_json(raw_dir / f"{scanner_name}.json", payload)
 
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for finding in findings:
+            severity = str(finding.get("severity", "")).lower()
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+        run_manifest = {
+            "project": project_name,
+            "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "score": float(score.get("overall_score", 0.0) or 0.0),
+            "grade": score.get("grade"),
+            "critical": severity_counts["critical"],
+            "high": severity_counts["high"],
+            "medium": severity_counts["medium"],
+            "low": severity_counts["low"],
+            "report_path": str(report_html),
+            "schema_version": summary.get("schema_version"),
+        }
+        self._atomic_write_json(run_dir / "run_manifest.json", run_manifest)
+
         latest_dir = project_dir / "latest"
-        self._update_latest_pointer(scan_dir=scan_dir, latest_dir=latest_dir)
-        return PersistedScanPaths(project_dir=project_dir, scan_dir=scan_dir, latest_dir=latest_dir)
+        self._update_latest_pointer(scan_dir=run_dir, latest_dir=latest_dir)
+        self._atomic_write_json(project_dir / "latest_manifest.json", run_manifest)
+        return PersistedScanPaths(project_dir=project_dir, run_dir=run_dir, latest_dir=latest_dir)
 
     def list_scan_dirs(self, project_name: str) -> list[Path]:
-        scans_root = self.reports_root / project_name / "scans"
-        if not scans_root.exists():
+        runs_root = self.report_root / "projects" / project_name / "runs"
+        if not runs_root.exists():
             return []
-        return sorted([path for path in scans_root.iterdir() if path.is_dir()], key=lambda item: item.name)
+        return sorted([path for path in runs_root.iterdir() if path.is_dir()], key=lambda item: item.name)
 
     def list_projects(self) -> list[str]:
-        if not self.reports_root.exists():
+        projects_root = self.report_root / "projects"
+        if not projects_root.exists():
             return []
-        return sorted(path.name for path in self.reports_root.iterdir() if path.is_dir())
+        return sorted(path.name for path in projects_root.iterdir() if path.is_dir())
 
     def load_json(self, path: Path) -> Any:
         return json.loads(path.read_text())
@@ -83,11 +105,13 @@ class ScanArtifactStore:
             summary_path = scan_dir / "summary.json"
             score_path = scan_dir / "score.json"
             policy_path = scan_dir / "policy.json"
+            run_manifest_path = scan_dir / "run_manifest.json"
             if not (summary_path.exists() and score_path.exists() and policy_path.exists()):
                 continue
             summary = self.load_json(summary_path)
             score = self.load_json(score_path)
             policy = self.load_json(policy_path)
+            run_manifest = self.load_json(run_manifest_path) if run_manifest_path.exists() else {}
             history.append(
                 {
                     "scan_id": info.scan_id,
@@ -95,6 +119,7 @@ class ScanArtifactStore:
                     "summary": summary,
                     "score": score,
                     "policy": policy,
+                    "run_manifest": run_manifest,
                     "scan_dir": scan_dir,
                 }
             )
@@ -161,6 +186,12 @@ class ScanArtifactStore:
 
     @staticmethod
     def parse_scan_timestamp(scan_id: str) -> datetime | None:
+        try:
+            date_part, _, time_part = scan_id.partition("_")
+            if time_part:
+                return datetime.strptime(f"{date_part}_{time_part}", "%Y-%m-%d_%H%M%S").replace(tzinfo=UTC)
+        except ValueError:
+            pass
         prefix = scan_id.split("_", 1)[0]
         try:
             return datetime.strptime(prefix, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
@@ -168,7 +199,7 @@ class ScanArtifactStore:
             return None
 
     def latest_preserved(self, project_name: str) -> bool:
-        latest_path = self.reports_root / project_name / "latest"
+        latest_path = self.report_root / "projects" / project_name / "latest"
         if not latest_path.exists() and not latest_path.is_symlink():
             return False
         try:

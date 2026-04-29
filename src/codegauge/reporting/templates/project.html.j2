@@ -2,261 +2,67 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>CodeGauge Project Report - {{ project }}</title>
+    <title>CodeGauge Project - {{ project }}</title>
     <style>
       body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
-      h1, h2 { margin-top: 1.5rem; }
       table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
       th, td { border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }
       th { background: #f3f4f6; }
+      .status-fail { color: #b91c1c; font-weight: 600; }
+      .status-warn { color: #92400e; font-weight: 600; }
+      .status-pass { color: #166534; font-weight: 600; }
       .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
     </style>
   </head>
   <body>
-    <p><a href="../index.html">Back to portfolio index</a></p>
+    <p><a href="../../index.html">Back to portal</a></p>
     <h1>Project: {{ project }}</h1>
-    {% if java_metadata %}
-    <p><strong>Frameworks:</strong> {{ java_metadata.frameworks|join(", ") if java_metadata.frameworks else "n/a" }}</p>
-    <p><strong>Module count:</strong> {{ java_metadata.module_count if java_metadata.module_count is not none else "n/a" }}</p>
+
+    {% if runs %}
+    <p>
+      Latest status:
+      <span class="status-{{ runs[0].policy_status }}">{{ runs[0].policy_status|upper }}</span>
+      | Score: {{ "%.2f"|format(runs[0].overall_score) }}
+      | Grade: {{ runs[0].grade or "-" }}
+    </p>
     {% endif %}
-
-    <h2>Score Summary</h2>
-    <p><strong>Overall score:</strong> {{ "%.2f"|format(score.overall_score) }}</p>
-    <p><strong>Grade:</strong> {{ score.grade }}</p>
-
-    {% if framework_cards %}
-    <h2>Framework Cards</h2>
-    <table>
-      <thead><tr><th>Signal</th><th>Value</th></tr></thead>
-      <tbody>
-        {% for card in framework_cards %}
-        <tr><td>{{ card.label }}</td><td>{{ card.value }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    {% if project_metadata.infrastructure %}
-    <h2>Infrastructure</h2>
-    <p><strong>Detected:</strong> {{ "yes" if project_metadata.infrastructure.detected else "no" }}</p>
-    <p><strong>Frameworks:</strong> {{ project_metadata.infrastructure.frameworks|join(", ") if project_metadata.infrastructure.frameworks else "n/a" }}</p>
-    <p><strong>Dockerfiles:</strong> {{ project_metadata.infrastructure.dockerfiles|length if project_metadata.infrastructure.dockerfiles else 0 }}</p>
-    <p><strong>Compose files:</strong> {{ project_metadata.infrastructure.compose_files|length if project_metadata.infrastructure.compose_files else 0 }}</p>
-    <p><strong>Quadlets:</strong> {{ project_metadata.infrastructure.quadlets|length if project_metadata.infrastructure.quadlets else 0 }}</p>
-    <p><strong>Proxy configs:</strong> {{ (project_metadata.infrastructure.traefik_configs|length if project_metadata.infrastructure.traefik_configs else 0) + (project_metadata.infrastructure.apache_configs|length if project_metadata.infrastructure.apache_configs else 0) + (project_metadata.infrastructure.nginx_configs|length if project_metadata.infrastructure.nginx_configs else 0) }}</p>
-    <p><strong>Terraform files:</strong> {{ project_metadata.infrastructure.terraform_files|length if project_metadata.infrastructure.terraform_files else 0 }}</p>
-    <p><strong>Shell scripts:</strong> {{ project_metadata.infrastructure.shell_scripts|length if project_metadata.infrastructure.shell_scripts else 0 }}</p>
-    {% endif %}
-
-    <h2>Metric Cards</h2>
-    <table>
-      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-      <tbody>
-        {% for card in metric_cards %}
-        <tr><td>{{ card.label }}</td><td>{{ card.value }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    {% if java_metric_cards %}
-    <h2>Java Metrics</h2>
-    <table>
-      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-      <tbody>
-        {% for card in java_metric_cards %}
-        <tr><td>{{ card.label }}</td><td>{{ card.value }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    {% if java_cache %}
-    <h2>Java Cache</h2>
-    <p><strong>Cached modules:</strong> {{ java_cache.cached_modules if java_cache.cached_modules is not none else "n/a" }}</p>
-    <p><strong>Cache hits:</strong> {{ java_cache.cache_hits if java_cache.cache_hits is not none else "n/a" }}</p>
-    <p><strong>Cache misses:</strong> {{ java_cache.cache_misses if java_cache.cache_misses is not none else "n/a" }}</p>
-    <p><strong>Last cache update:</strong> {{ java_cache.last_cache_update if java_cache.last_cache_update else "n/a" }}</p>
-    <p><strong>Miss reasons:</strong> <span class="mono">
-      {% if java_cache.miss_reason_counts %}
-        {% for reason, count in java_cache.miss_reason_counts.items() %}{{ reason }}={{ count }} {% endfor %}
-      {% else %}
-        -
-      {% endif %}
-    </span></p>
-    <table>
-      <thead><tr><th>Tool</th><th>Hits</th><th>Misses</th><th>Miss Reasons</th></tr></thead>
-      <tbody>
-        {% for item in java_cache.tools or [] %}
-        <tr>
-          <td>{{ item.tool }}</td>
-          <td>{{ item.hits }}</td>
-          <td>{{ item.misses }}</td>
-          <td class="mono">
-            {% if item.miss_reason_counts %}
-              {% for reason, count in item.miss_reason_counts.items() %}{{ reason }}={{ count }} {% endfor %}
-            {% else %}
-              -
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    {% if spring_posture_cards %}
-    <h2>Spring Posture</h2>
-    <table>
-      <thead><tr><th>Posture</th><th>Status</th></tr></thead>
-      <tbody>
-        {% for card in spring_posture_cards %}
-        <tr><td>{{ card.label }}</td><td>{{ card.value }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    <h2>Policy</h2>
-    <p><strong>Status:</strong> {{ policy.status|upper }}</p>
-    <p><strong>Reason Codes:</strong> <span class="mono">{{ policy.reasons|join(", ") if policy.reasons else "-" }}</span></p>
-    <p><strong>Summary:</strong> {{ policy.summary }}</p>
-    <p><strong>Accepted debt:</strong> {{ baseline.accepted_debt if baseline.accepted_debt is not none else "n/a" }}</p>
-    <p><strong>New debt:</strong> {{ baseline.new_findings if baseline.new_findings is not none else "n/a" }}</p>
-    <p><strong>Resolved debt:</strong> {{ baseline.resolved_findings if baseline.resolved_findings is not none else "n/a" }}</p>
-
-    {% if baseline_governance %}
-    <h2>Baseline Governance</h2>
-    <table>
-      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-      <tbody>
-        {% for item in baseline_governance %}
-        <tr><td>{{ item.label }}</td><td>{{ item.value }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    <h2>Dedupe</h2>
-    <p><strong>Total findings:</strong> {{ dedupe.total_findings if dedupe.total_findings is not none else summary.finding_count }}</p>
-    <p><strong>Suppressed duplicates:</strong> {{ dedupe.suppressed_count if dedupe.suppressed_count is not none else 0 }}</p>
-    <p><strong>Net scored findings:</strong> {{ baseline.scored_findings if baseline.scored_findings is not none else (dedupe.net_findings if dedupe.net_findings is not none else summary.finding_count) }}</p>
 
     <h2>Runs</h2>
     <table>
-      <thead><tr><th>Timestamp</th><th>Policy</th><th>Score / Grade</th><th>Reason Codes</th><th>Artifacts</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Generated</th>
+          <th>Policy</th>
+          <th>Score</th>
+          <th>Grade</th>
+          <th>Critical</th>
+          <th>High</th>
+          <th>Medium</th>
+          <th>Low</th>
+          <th>Reason Codes</th>
+          <th>Artifacts</th>
+        </tr>
+      </thead>
       <tbody>
         {% for run in runs %}
         <tr>
-          <td class="mono">
-            Local: <a href="{{ run.summary_link }}" title="{{ run.utc_timestamp }}">{{ run.local_timestamp }}</a>
-            <br />
-            <small>UTC: {{ run.utc_timestamp }}</small>
-          </td>
-          <td>{{ run.policy_status|upper }}</td>
-          <td>{{ "%.0f"|format(run.overall_score) }}/{{ run.grade }}</td>
+          <td class="mono" title="{{ run.generated_at }}">{{ run.generated_local }}</td>
+          <td class="status-{{ run.policy_status }}">{{ run.policy_status|upper }}</td>
+          <td>{{ "%.2f"|format(run.overall_score) }}</td>
+          <td>{{ run.grade or "-" }}</td>
+          <td>{{ run.critical }}</td>
+          <td>{{ run.high }}</td>
+          <td>{{ run.medium }}</td>
+          <td>{{ run.low }}</td>
           <td class="mono">{{ run.reason_codes|join(", ") if run.reason_codes else "-" }}</td>
           <td>
+            <a href="{{ run.report_link }}">report.html</a>
             <a href="{{ run.summary_link }}">summary.json</a>
             <a href="{{ run.findings_link }}">findings.json</a>
-            <a href="{{ run.score_link }}">score.json</a>
-            <a href="{{ run.policy_link }}">policy.json</a>
-            <a href="{{ run.raw_link }}">raw/</a>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-
-    <h2>Score Breakdown</h2>
-    <table>
-      <thead><tr><th>Category</th><th>Score</th><th>Findings</th><th>Weight</th><th>Summary</th></tr></thead>
-      <tbody>
-        {% for category in score.category_scores %}
-        <tr>
-          <td>{{ category.category }}</td>
-          <td>{{ "%.2f"|format(category.score) }}</td>
-          <td>{{ category.finding_count }}</td>
-          <td>{{ "%.2f"|format(category.weight) }}</td>
-          <td>{{ category.summary }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <h2>Findings by Severity</h2>
-    <table>
-      <thead><tr><th>Severity</th><th>Count</th></tr></thead>
-      <tbody>
-        {% for severity, count in severity_counts.items() %}
-        <tr><td>{{ severity }}</td><td>{{ count }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <h2>Top Files</h2>
-    <table>
-      <thead><tr><th>File</th><th>Findings</th></tr></thead>
-      <tbody>
-        {% for item in top_files %}
-        <tr><td class="mono">{{ item.file }}</td><td>{{ item.count }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <h2>Scanner Status</h2>
-    <table>
-      <thead><tr><th>Scanner</th><th>Success</th><th>Error</th><th>Findings</th><th>Duplicates Suppressed</th><th>Duration (ms)</th></tr></thead>
-      <tbody>
-        {% for scanner in scanner_status %}
-        <tr>
-          <td>{{ scanner.scanner_name }}</td>
-          <td>{{ scanner.success }}</td>
-          <td class="mono">{{ scanner.error_code or "-" }}</td>
-          <td>{{ scanner.finding_count }}</td>
-          <td>{{ scanner.duplicates_suppressed }}</td>
-          <td>{{ "%.2f"|format(scanner.duration_ms) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <h2>Historical Trend</h2>
-    <table>
-      <thead><tr><th>Scan</th><th>Overall Score</th><th>Grade</th><th>Policy</th><th>Maintainability Index</th><th>Average Complexity</th><th>Worst Complexity</th><th>Accepted Debt</th><th>New Debt</th><th>Resolved Debt</th></tr></thead>
-      <tbody>
-        {% for point in trend %}
-        <tr>
-          <td class="mono">{{ point.scan_id }}</td>
-          <td>{{ "%.2f"|format(point.overall_score) }}</td>
-          <td>{{ point.grade }}</td>
-          <td>{{ point.policy_status|upper }}</td>
-          <td>{% if point.maintainability_index is not none %}{{ "%.2f"|format(point.maintainability_index) }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.average_complexity is not none %}{{ "%.2f"|format(point.average_complexity) }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.worst_complexity is not none %}{{ point.worst_complexity }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.accepted_debt is not none %}{{ point.accepted_debt }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.new_debt is not none %}{{ point.new_debt }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.resolved_debt is not none %}{{ point.resolved_debt }}{% else %}n/a{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    {% if show_java_trend %}
-    <h2>Java Trend</h2>
-    <table>
-      <thead><tr><th>Run</th><th>Coverage</th><th>Branch</th><th>Duplication</th><th>Maintainability</th></tr></thead>
-      <tbody>
-        {% for point in java_trend %}
-        <tr>
-          <td class="mono">{{ point.scan_id }}</td>
-          <td>{% if point.coverage_percent is not none %}{{ "%.0f"|format(point.coverage_percent) }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.branch_coverage_percent is not none %}{{ "%.0f"|format(point.branch_coverage_percent) }}{% else %}n/a{% endif %}</td>
-          <td>{% if point.duplication_percent is not none %}{{ "%.1f"|format(point.duplication_percent) }}{% else %}n/a{% endif %}</td>
-          <td>{{ point.maintainability_grade if point.maintainability_grade is not none else "n/a" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
   </body>
 </html>
