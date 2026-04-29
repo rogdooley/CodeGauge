@@ -23,8 +23,8 @@ def test_show_config_prints_resolved_json(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["default_timeout_seconds"] == 33
-    assert Path(payload["reports_dir"]).is_absolute()
-    assert Path(payload["site_dir"]).is_absolute()
+    assert Path(payload["report_root"]).is_absolute()
+    assert Path(payload["state_root"]).is_absolute()
 
 
 def test_scan_runs_with_stub_scanners(tmp_path: Path) -> None:
@@ -383,3 +383,48 @@ def test_compact_opengrep_raw_output_caps_sample_messages() -> None:
     )
     compact = _compact_scanner_raw_output(result)
     assert len(compact["sample_messages"]) == 25
+
+
+def test_scan_open_flag_attempts_to_open_portal(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "open_proj"
+    project.mkdir()
+    report_root = tmp_path / "CodeGauge"
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / ".codegauge.toml").write_text(
+        f'report_root = "{report_root.as_posix()}"\nenabled_scanners = ["ruff"]\nopen_report = false\n'
+    )
+
+    called: dict[str, str] = {}
+
+    def fake_open(target: Path):
+        called["target"] = str(target)
+        return True, "opened"
+
+    monkeypatch.setattr("codegauge.cli.open_in_browser", fake_open)
+    result = runner.invoke(app, ["scan", str(project), "--open"])
+    assert result.exit_code == 0
+    assert called["target"].endswith("index.html")
+
+
+def test_open_command_missing_portal_is_helpful(tmp_path: Path) -> None:
+    project = tmp_path / "open_missing"
+    project.mkdir()
+    report_root = tmp_path / "CodeGauge"
+    (project / ".codegauge.toml").write_text(f'report_root = "{report_root.as_posix()}"\n')
+    result = runner.invoke(app, ["open", str(project)])
+    assert result.exit_code == 0
+    assert "No report portal found" in result.stdout
+
+
+def test_cache_status_uses_state_root_cache_path(tmp_path: Path) -> None:
+    project = tmp_path / "cache_state"
+    project.mkdir()
+    state_root = tmp_path / "state"
+    (project / "pom.xml").write_text("<project/>")
+    (project / "src" / "main" / "java").mkdir(parents=True)
+    (project / "src" / "main" / "java" / "App.java").write_text("class App {}")
+    (project / ".codegauge.toml").write_text(f'state_root = "{state_root.as_posix()}"\n')
+    result = runner.invoke(app, ["cache", "status", str(project)])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert str(state_root) in payload["cache_root"]

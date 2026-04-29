@@ -7,7 +7,7 @@ from codegauge.reporting import StaticSiteBuilder
 
 
 def _seed_snapshot_reports(reports_dir: Path) -> None:
-    scan_dir = reports_dir / "snap" / "scans" / "20260101T000000Z"
+    scan_dir = reports_dir / "projects" / "snap" / "runs" / "2026-01-01_000000"
     scan_dir.mkdir(parents=True, exist_ok=True)
     (scan_dir / "summary.json").write_text(
         json.dumps(
@@ -122,61 +122,41 @@ def _seed_snapshot_reports(reports_dir: Path) -> None:
             }
         )
     )
+    (scan_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "snap",
+                "generated_at": "2026-01-01T00:00:00Z",
+                "score": 72.5,
+                "grade": "C",
+                "critical": 0,
+                "high": 1,
+                "medium": 0,
+                "low": 1,
+                "report_path": str(scan_dir / "report.html"),
+                "schema_version": "2.0.0",
+            }
+        )
+    )
+    (scan_dir / "report.html").write_text("<html><body>report</body></html>")
 
 
 def test_html_snapshot_contains_expected_sections(tmp_path: Path) -> None:
-    reports_dir = tmp_path / "reports"
-    site_dir = tmp_path / "site"
+    reports_dir = tmp_path / "CodeGauge"
+    site_dir = tmp_path / "CodeGaugeSite"
     _seed_snapshot_reports(reports_dir)
 
     builder = StaticSiteBuilder(reports_root=reports_dir, site_root=site_dir)
     builder.build()
 
     index_html = (site_dir / "index.html").read_text()
-    project_html = (site_dir / "projects" / "snap.html").read_text()
+    project_html = (site_dir / "projects" / "snap" / "index.html").read_text()
 
-    assert "CodeGauge Leadership Summary" in index_html
-    assert "Reason Codes" in index_html
-    assert "low_score" in index_html
-    assert "Executive Summary" in index_html
+    assert "CodeGauge Report Portal" in index_html
     assert "Project Count" in index_html
-    assert "Worst Project" in index_html
-    assert "Cache Hit Rate" in index_html
-    assert "Python Cache Efficiency" in index_html
-    assert "Java Cache Efficiency" in index_html
-    assert "JavaScript Cache Efficiency" in index_html
-    assert "Django Cache Efficiency" in index_html
+    assert "projects/snap/index.html" in index_html
 
     assert "Project: snap" in project_html
-    assert "Frameworks:" in project_html
-    assert "Module count:" in project_html
-    assert "Overall score:" in project_html
-    assert "Metric Cards" in project_html
-    assert "Java Metrics" in project_html
-    assert "Spring Posture" in project_html
-    assert "Java Trend" in project_html
-    assert "Java Cache" in project_html
-    assert "Miss reasons:" in project_html
-    assert "Dedupe" in project_html
     assert "Runs" in project_html
-    assert "Local:" in project_html
-    assert "UTC:" in project_html
-    assert "Findings by Severity" in project_html
-    assert "Top Files" in project_html
-    assert "Scanner Status" in project_html
-    assert "Historical Trend" in project_html
-    assert "Maintainability Index" in project_html
-    assert "Average Complexity" in project_html
-    assert "Worst Complexity" in project_html
-    assert "Accepted Debt" in project_html
-    assert "New Debt" in project_html
-    assert "Resolved Debt" in project_html
-    assert "Duplicates Suppressed" in project_html
-    assert "Baseline Governance" in project_html
-    assert "Accepted Entries" in project_html
-    assert "Expired Entries" in project_html
-    assert "Infrastructure" in project_html
-    assert "Container Hardening" in project_html
-    assert "Reverse Proxy Posture" in project_html
-    assert "IaC Safety" in project_html
-    assert "../../reports/snap/scans/20260101T000000Z/summary.json" in project_html
+    assert "summary.json" in project_html
+    assert "findings.json" in project_html

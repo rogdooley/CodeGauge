@@ -15,13 +15,13 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     project = tmp_path / "artifact-project"
     project.mkdir()
     (project / "pyproject.toml").write_text("[project]\nname='artifact-project'\nversion='0.0.1'\n")
-    reports_dir = project / "reports"
-    site_dir = project / "site"
+    report_root = project / "CodeGauge"
+    state_root = project / "state"
     (project / ".codegauge.toml").write_text(
         "\n".join(
             [
-                f'reports_dir = "{reports_dir.as_posix()}"',
-                f'site_dir = "{site_dir.as_posix()}"',
+                f'report_root = "{report_root.as_posix()}"',
+                f'state_root = "{state_root.as_posix()}"',
                 'enabled_scanners = ["ruff"]',
             ]
         )
@@ -30,15 +30,15 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(project), "--json"])
     assert result.exit_code == 0
 
-    project_reports = reports_dir / "artifact-project"
-    scans_root = project_reports / "scans"
-    assert scans_root.exists()
+    project_reports = report_root / "projects" / "artifact-project"
+    runs_root = project_reports / "runs"
+    assert runs_root.exists()
 
-    scan_dirs = sorted([path for path in scans_root.iterdir() if path.is_dir()])
+    scan_dirs = sorted([path for path in runs_root.iterdir() if path.is_dir()])
     assert len(scan_dirs) == 1
     scan_dir = scan_dirs[0]
 
-    for file_name in ["summary.json", "findings.json", "score.json", "policy.json"]:
+    for file_name in ["summary.json", "findings.json", "score.json", "policy.json", "run_manifest.json"]:
         assert (scan_dir / file_name).exists()
     raw_files = list((scan_dir / "raw").glob("*.json"))
     assert raw_files
@@ -46,6 +46,9 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     latest = project_reports / "latest"
     assert latest.exists()
     assert (latest / "summary.json").exists()
+    assert (project_reports / "latest_manifest.json").exists()
+    assert (report_root / "index.html").exists()
+    assert (report_root / "projects" / "artifact-project" / "index.html").exists()
 
     summary_payload = json.loads((scan_dir / "summary.json").read_text())
     findings_payload = json.loads((scan_dir / "findings.json").read_text())

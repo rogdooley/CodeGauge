@@ -10,14 +10,15 @@ from codegauge.config.config import ConfigLoadError, load_config
 def test_config_loads_defaults_for_project(tmp_path: Path) -> None:
     config = load_config(project_path=tmp_path)
     assert config.default_timeout_seconds == 120
-    assert config.reports_dir == (tmp_path / ".codegauge/reports").resolve()
-    assert config.site_dir == (tmp_path / ".codegauge/site").resolve()
+    assert config.report_root.is_absolute()
+    assert config.state_root.is_absolute()
+    assert config.open_report is False
     assert config.payload.capture_full_raw is False
     assert config.payload.redact is True
 
 
 def test_malformed_toml_fails_with_clear_error(tmp_path: Path) -> None:
-    (tmp_path / ".codegauge.toml").write_text("reports_dir = [\n")
+    (tmp_path / ".codegauge.toml").write_text("report_root = [\n")
     with pytest.raises(ConfigLoadError, match="Invalid TOML"):
         load_config(project_path=tmp_path)
 
@@ -96,12 +97,28 @@ def test_paths_expand_user_and_resolve_to_project(tmp_path: Path, monkeypatch: p
     (project_root / ".codegauge.toml").write_text(
         "\n".join(
             [
-                'reports_dir = "~/codegauge/reports"',
-                'site_dir = "artifacts/site"',
+                'report_root = "~/CodeGaugeReports"',
+                'state_root = "artifacts/state"',
             ]
         )
     )
 
     config = load_config(project_path=project_root)
-    assert config.reports_dir == (fake_home / "codegauge/reports").resolve()
-    assert config.site_dir == (project_root / "artifacts/site").resolve()
+    assert config.report_root == (fake_home / "CodeGaugeReports").resolve()
+    assert config.state_root == (project_root / "artifacts/state").resolve()
+
+
+def test_legacy_reports_site_fields_are_accepted_as_compatibility_aliases(tmp_path: Path) -> None:
+    project_root = tmp_path / "legacy_project"
+    project_root.mkdir()
+    (project_root / ".codegauge.toml").write_text(
+        "\n".join(
+            [
+                'reports_dir = "reports"',
+                'site_dir = "site"',
+            ]
+        )
+    )
+    config = load_config(project_path=project_root)
+    assert config.report_root == (project_root / "reports").resolve()
+    assert config.state_root.is_absolute()

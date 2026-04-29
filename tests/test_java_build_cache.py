@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from codegauge.cli import app
+from codegauge.paths import java_cache_root_for_project
 from codegauge.storage import JavaBuildCacheService
 
 
@@ -23,7 +24,7 @@ def _seed_java_project(root: Path) -> None:
 
 def test_cache_key_changes_when_source_changes(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key_before, _ = service.compute_cache_key(module, "spotbugs")
     (tmp_path / "src" / "main" / "java" / "App.java").write_text("class App { int x = 1; }")
@@ -33,7 +34,7 @@ def test_cache_key_changes_when_source_changes(tmp_path: Path) -> None:
 
 def test_cache_key_changes_when_build_descriptor_changes(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key_before, _ = service.compute_cache_key(module, "pmd")
     (tmp_path / "pom.xml").write_text("<project><version>2</version></project>")
@@ -48,7 +49,7 @@ def test_multi_module_cache_is_per_module(tmp_path: Path) -> None:
     _seed_java_project(module_a)
     _seed_java_project(module_b)
 
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     modules = service.discover_modules()
     assert len(modules) >= 3
     ids = {module.module_id for module in modules}
@@ -57,7 +58,8 @@ def test_multi_module_cache_is_per_module(tmp_path: Path) -> None:
 
 def test_cache_manifest_reuse(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    cache_root = java_cache_root_for_project(tmp_path / "state", tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=cache_root)
     module = service.discover_modules()[0]
     key, input_hashes = service.compute_cache_key(module, "jacoco")
     artifact = tmp_path / "target" / "site" / "jacoco" / "jacoco.xml"
@@ -73,13 +75,13 @@ def test_cache_manifest_reuse(tmp_path: Path) -> None:
     reused, reasons, _manifest = service.try_reuse(module=module, tool="jacoco", cache_key=key, input_hashes=input_hashes)
     assert reused is not None
     assert reused[0].exists()
-    assert ".scan-cache/java/modules/" in reused[0].as_posix()
+    assert str(cache_root) in reused[0].as_posix()
     assert reasons == []
 
 
 def test_cache_miss_reason_on_source_hash_change(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key, input_hashes = service.compute_cache_key(module, "spotbugs")
     artifact = tmp_path / "target" / "spotbugsXml.xml"
@@ -101,7 +103,7 @@ def test_cache_miss_reason_on_source_hash_change(tmp_path: Path) -> None:
 
 def test_cache_history_bounded_to_last_ten(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     artifact = tmp_path / "target" / "spotbugsXml.xml"
     artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -127,12 +129,14 @@ def test_cache_history_bounded_to_last_ten(tmp_path: Path) -> None:
 
 def test_cache_status_and_clear_cli(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key, input_hashes = service.compute_cache_key(module, "spotbugs")
     artifact = tmp_path / "target" / "spotbugsXml.xml"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("<BugCollection/>")
+    state_root = tmp_path / "state"
+    (tmp_path / ".codegauge.toml").write_text(f'state_root = "{state_root.as_posix()}"\n')
     service.save_manifest(
         module=module,
         tool="spotbugs",
@@ -141,26 +145,26 @@ def test_cache_status_and_clear_cli(tmp_path: Path) -> None:
         input_hashes=input_hashes,
     )
 
-    status_result = runner.invoke(app, ["cache", "status", str(tmp_path)])
+    status_result = runner.invoke(app, ["cache", "status", str(tmp_path), "--state-root", str(state_root)])
     assert status_result.exit_code == 0
     status = json.loads(status_result.stdout)
     assert status["modules"]
     assert "totals" in status
     assert "tools" in status["modules"][0]
-    status_human = runner.invoke(app, ["cache", "status", str(tmp_path), "--human"])
+    status_human = runner.invoke(app, ["cache", "status", str(tmp_path), "--state-root", str(state_root), "--human"])
     assert status_human.exit_code == 0
     assert "Cache totals:" in status_human.stdout
 
-    status_tool = runner.invoke(app, ["cache", "status", str(tmp_path), "--tool", "spotbugs"])
+    status_tool = runner.invoke(app, ["cache", "status", str(tmp_path), "--state-root", str(state_root), "--tool", "spotbugs"])
     assert status_tool.exit_code == 0
 
-    clear_dry = runner.invoke(app, ["cache", "clear", str(tmp_path), "--dry-run"])
+    clear_dry = runner.invoke(app, ["cache", "clear", str(tmp_path), "--state-root", str(state_root), "--dry-run"])
     assert clear_dry.exit_code == 0
     payload = json.loads(clear_dry.stdout)
     assert payload["dry_run"] is True
     assert payload["removed_count"] >= 1
 
-    clear_apply = runner.invoke(app, ["cache", "clear", str(tmp_path)])
+    clear_apply = runner.invoke(app, ["cache", "clear", str(tmp_path), "--state-root", str(state_root)])
     assert clear_apply.exit_code == 0
     payload_apply = json.loads(clear_apply.stdout)
     assert payload_apply["removed_count"] >= 1
@@ -168,12 +172,14 @@ def test_cache_status_and_clear_cli(tmp_path: Path) -> None:
 
 def test_cache_clear_selective_tool_and_module(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key, hashes = service.compute_cache_key(module, "spotbugs")
     artifact = tmp_path / "target" / "spotbugsXml.xml"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("<BugCollection/>")
+    state_root = tmp_path / "state"
+    (tmp_path / ".codegauge.toml").write_text(f'state_root = "{state_root.as_posix()}"\n')
     service.save_manifest(
         module=module,
         tool="spotbugs",
@@ -183,7 +189,18 @@ def test_cache_clear_selective_tool_and_module(tmp_path: Path) -> None:
     )
     result = runner.invoke(
         app,
-        ["cache", "clear", str(tmp_path), "--module", module.module_name, "--tool", "spotbugs", "--dry-run"],
+        [
+            "cache",
+            "clear",
+            str(tmp_path),
+            "--state-root",
+            str(state_root),
+            "--module",
+            module.module_name,
+            "--tool",
+            "spotbugs",
+            "--dry-run",
+        ],
     )
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -192,7 +209,7 @@ def test_cache_clear_selective_tool_and_module(tmp_path: Path) -> None:
 
 def test_cache_prune_removes_stale_manifest_and_orphan_artifact(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key, hashes = service.compute_cache_key(module, "spotbugs")
     artifact = tmp_path / "target" / "spotbugs.xml"
@@ -231,7 +248,7 @@ def test_cache_prune_removes_stale_manifest_and_orphan_artifact(tmp_path: Path) 
 
 def test_cache_prune_cli_summary_and_dry_run(tmp_path: Path) -> None:
     _seed_java_project(tmp_path)
-    service = JavaBuildCacheService(tmp_path)
+    service = JavaBuildCacheService(tmp_path, cache_root=java_cache_root_for_project(tmp_path / "state", tmp_path))
     module = service.discover_modules()[0]
     key, hashes = service.compute_cache_key(module, "spotbugs")
     artifact = tmp_path / "target" / "spotbugs.xml"
