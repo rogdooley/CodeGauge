@@ -46,8 +46,12 @@ _DJANGO_SETTINGS_RE = re.compile(
     re.IGNORECASE,
 )
 _DJANGO_ORM_RE = re.compile(r"\b(models\.|Model\)|select_related\(|prefetch_related\(|db_index=)", re.IGNORECASE)
-_FASTAPI_RE = re.compile(r"\b(fastapi|FastAPI|APIRouter)\b")
-_FLASK_RE = re.compile(r"\b(flask|Flask|Blueprint)\b")
+_FASTAPI_IMPORT_RE = re.compile(r"\b(from\s+fastapi\s+import|import\s+fastapi\b)", re.IGNORECASE)
+_FASTAPI_APP_RE = re.compile(r"\bFastAPI\s*\(")
+_FASTAPI_ROUTER_RE = re.compile(r"\bAPIRouter\s*\(")
+_FLASK_IMPORT_RE = re.compile(r"\b(from\s+flask\s+import|import\s+flask\b)", re.IGNORECASE)
+_FLASK_APP_RE = re.compile(r"\bFlask\s*\(")
+_FLASK_BLUEPRINT_RE = re.compile(r"\bBlueprint\s*\(")
 
 _JS_FRAMEWORK_MARKERS: dict[str, tuple[str, ...]] = {
     "react": ("react", "react-dom", "next"),
@@ -90,10 +94,19 @@ class ProjectDiscoveryService:
         if django_meta is not None:
             metadata["django"] = django_meta
             metadata["python_framework"] = "django"
+            metadata["python_runtime"] = {
+                "language": "python",
+                "framework": "django",
+                "framework_confidence": 0.98,
+            }
         else:
-            framework = self._detect_python_framework(path)
-            if framework is not None:
-                metadata["python_framework"] = framework
+            framework, confidence = self._detect_python_framework(path)
+            metadata["python_framework"] = framework
+            metadata["python_runtime"] = {
+                "language": "python",
+                "framework": framework,
+                "framework_confidence": confidence,
+            }
 
         js_meta = self._discover_js_metadata(path)
         if js_meta is not None:
@@ -110,13 +123,29 @@ class ProjectDiscoveryService:
 
         return Project(name=path.name, path=path, language_hints=language_hints, metadata=metadata)
 
-    def _detect_python_framework(self, root: Path) -> str | None:
+    def _detect_python_framework(self, root: Path) -> tuple[str, float]:
         py_sources = list(root.rglob("*.py"))[:2000]
-        if self._files_match(py_sources, _FASTAPI_RE):
-            return "fastapi"
-        if self._files_match(py_sources, _FLASK_RE):
-            return "flask"
-        return None
+        fastapi_signals = 0
+        if self._files_match(py_sources, _FASTAPI_IMPORT_RE):
+            fastapi_signals += 1
+        if self._files_match(py_sources, _FASTAPI_APP_RE):
+            fastapi_signals += 1
+        if self._files_match(py_sources, _FASTAPI_ROUTER_RE):
+            fastapi_signals += 1
+        if fastapi_signals > 0:
+            return "fastapi", 0.55 + (0.15 * fastapi_signals)
+
+        flask_signals = 0
+        if self._files_match(py_sources, _FLASK_IMPORT_RE):
+            flask_signals += 1
+        if self._files_match(py_sources, _FLASK_APP_RE):
+            flask_signals += 1
+        if self._files_match(py_sources, _FLASK_BLUEPRINT_RE):
+            flask_signals += 1
+        if flask_signals > 0:
+            return "flask", 0.55 + (0.15 * flask_signals)
+
+        return "generic", 0.4
 
     @staticmethod
     def _is_python_project(root: Path) -> bool:

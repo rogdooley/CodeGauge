@@ -10,6 +10,7 @@ from time import perf_counter
 
 import typer
 
+from .constants import ExitCode, InternalErrorCode, ParserErrorCode, ScannerErrorCode
 from .baseline import BaselineService
 from .bootstrap.factory import (
     build_scan_services,
@@ -41,11 +42,11 @@ cache_app = typer.Typer()
 app.add_typer(cache_app, name="cache")
 
 _PARSE_FAILURE_CODES = {
-    "scanner_parse_error",
-    "scanner_output_invalid",
+    ParserErrorCode.parse_error,
+    ParserErrorCode.output_invalid,
 }
-_PARSER_MISSING_CODE = "scanner_parser_missing"
-_INVALID_PATH_CODE = "finding_path_invalid"
+_PARSER_MISSING_CODE = ParserErrorCode.parser_missing
+_INVALID_PATH_CODE = ParserErrorCode.finding_path_invalid
 
 
 def _atomic_write_json(path: Path, payload: object) -> None:
@@ -222,7 +223,10 @@ def scan(
     fail_on_policy: bool = typer.Option(
         False,
         "--fail-on-policy",
-        help="Set process exit code from policy status: pass=0, warn=1, fail=2, internal errors=3.",
+        help=(
+            "Set process exit code from policy status when scan succeeds: pass=0, warn=1, fail=2. "
+            "Execution errors use fixed codes: config=3, scanner=4, parser=5, internal=6, interrupted=7."
+        ),
     ),
     capture_full_raw: bool = typer.Option(
         False,
@@ -230,14 +234,48 @@ def scan(
         help="Capture full unredacted raw payload (requires payload.capture_full_raw=true in config).",
     ),
 ) -> None:
+    def _raise_scan_exit(results_payload, policy_status: PolicyStatus, *, policy_gate: bool) -> None:
+        scanner_failure = any(
+            row.error_code
+            in {
+                ScannerErrorCode.contract_violation,
+                ScannerErrorCode.binary_missing,
+                ScannerErrorCode.config_error,
+                ScannerErrorCode.nonzero_exit,
+                ScannerErrorCode.timeout,
+            }
+            for row in results_payload
+        )
+        parser_failure = any(
+            row.error_code in {ParserErrorCode.parser_missing, ParserErrorCode.parse_error, ParserErrorCode.output_invalid}
+            for row in results_payload
+        ) or any(int(row.metadata.get("invalid_finding_count", 0) or 0) > 0 for row in results_payload)
+        if scanner_failure:
+            raise typer.Exit(code=int(ExitCode.scanner_failure))
+        if parser_failure:
+            raise typer.Exit(code=int(ExitCode.parser_failure))
+        if policy_gate:
+            if policy_status == PolicyStatus.pass_:
+                raise typer.Exit(code=int(ExitCode.success))
+            if policy_status == PolicyStatus.warn:
+                raise typer.Exit(code=int(ExitCode.policy_warning))
+            if policy_status == PolicyStatus.fail:
+                raise typer.Exit(code=int(ExitCode.policy_fail))
+        raise typer.Exit(code=int(ExitCode.success))
+
     try:
         services = build_scan_services(path)
     except ConfigLoadError as exc:
         typer.echo(str(exc), err=True)
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=int(ExitCode.config_error)) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt as exc:
+        typer.echo(str(InternalErrorCode.interrupted), err=True)
+        raise typer.Exit(code=int(ExitCode.interrupted)) from exc
     except Exception as exc:
         typer.echo(f"scan execution failed: {exc}", err=True)
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=int(ExitCode.internal_error)) from exc
     try:
         project = services.project
         start = perf_counter()
@@ -248,7 +286,7 @@ def scan(
                 "Run from a project root or adjust enabled_scanners/config.",
                 err=True,
             )
-            raise typer.Exit(code=3)
+            raise typer.Exit(code=int(ExitCode.config_error))
         duration_ms = (perf_counter() - start) * 1000
         metrics_extractor = MetricsExtractor()
         deduped_results = metrics_extractor.dedupe_scan_results(results)
@@ -379,9 +417,11 @@ def scan(
             policy=summary.policy or {},
             scanner_raw_outputs=raw_outputs,
         )
+    except typer.Exit:
+        raise
     except Exception as exc:
         typer.echo(f"scan execution failed: {exc}", err=True)
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=int(ExitCode.internal_error)) from exc
 
     if json_output:
         payload = dict(summary_payload)
@@ -420,13 +460,8 @@ def scan(
             typer.echo(f"Policy reasons: {', '.join(summary.policy['reasons'])}")
 
     if fail_on_policy:
-        if policy.status == PolicyStatus.pass_:
-            raise typer.Exit(code=0)
-        if policy.status == PolicyStatus.warn:
-            raise typer.Exit(code=1)
-        if policy.status == PolicyStatus.fail:
-            raise typer.Exit(code=2)
-        raise typer.Exit(code=3)
+        _raise_scan_exit(results, policy.status, policy_gate=True)
+    _raise_scan_exit(results, policy.status, policy_gate=False)
 
 
 @app.command("build-site")

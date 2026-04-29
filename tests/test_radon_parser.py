@@ -47,7 +47,7 @@ class StubRadonScanner(RadonScanner):
             ),
         ]
 
-    def execute(self, project_path: Path):
+    def execute(self, project_path: Path, files=None):
         # Use base scanner execute behavior on the synthetic command.
         from codegauge.scanners.base import Scanner
 

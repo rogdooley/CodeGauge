@@ -70,6 +70,25 @@ def test_fastapi_style_settings_file_does_not_trigger_django_detection(tmp_path:
     project = ProjectDiscoveryService().discover(proj)
     assert Language.python in project.language_hints
     assert project.metadata.get("django") is None
+    runtime = project.metadata.get("python_runtime")
+    assert isinstance(runtime, dict)
+    assert runtime["language"] == "python"
+    assert runtime["framework"] == "fastapi"
+    assert runtime["framework_confidence"] >= 0.7
+
+
+def test_generic_python_framework_detected_with_low_confidence(tmp_path: Path) -> None:
+    proj = tmp_path / "generic-python"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname='generic'\nversion='0.1.0'\n")
+    (proj / "script.py").write_text("print('hello')\n")
+
+    project = ProjectDiscoveryService().discover(proj)
+    runtime = project.metadata.get("python_runtime")
+    assert isinstance(runtime, dict)
+    assert runtime["language"] == "python"
+    assert runtime["framework"] == "generic"
+    assert runtime["framework_confidence"] == 0.4
 
 
 def test_typescript_project_detected_with_framework_metadata(tmp_path: Path) -> None:

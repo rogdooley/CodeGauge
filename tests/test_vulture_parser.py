@@ -36,6 +36,12 @@ class StubVultureScanner(VultureScanner):
             "import json; print(json.dumps([{'filename':'src/a.py','first_line':3,'name':'x','type':'variable','size':1}]))",
         ]
 
+    def supports_explicit_file_list(self) -> bool:
+        return True
+
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
+        return self.build_command(project_path)
+
 
 def test_vulture_findings_flow_through_orchestrator(tmp_path: Path) -> None:
     project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])

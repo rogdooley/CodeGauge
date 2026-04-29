@@ -80,7 +80,7 @@ def test_scan_human_output_shows_contract_violation_for_unsupported_scanner(tmp_
 
     monkeypatch.setattr("codegauge.scanners.java_build_scanner_base.subprocess.run", fake_run)
     result = runner.invoke(app, ["scan", str(project)])
-    assert result.exit_code == 0
+    assert result.exit_code == 4
     assert "Policy status: FAIL" in result.stdout
     assert "Policy reasons: scanner_failure" in result.stdout
 
@@ -238,7 +238,7 @@ def test_scan_fail_on_policy_exit_code_internal(monkeypatch) -> None:
 
     monkeypatch.setattr("codegauge.cli.build_scan_services", explode)
     result = runner.invoke(app, ["scan", ".", "--fail-on-policy"])
-    assert result.exit_code == 3
+    assert result.exit_code == 6
 
 
 def test_fastapi_policy_resolution_disables_django_scanners(tmp_path: Path) -> None:
@@ -250,7 +250,9 @@ def test_fastapi_policy_resolution_disables_django_scanners(tmp_path: Path) -> N
     result = runner.invoke(app, ["scan", str(project), "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
+    assert payload["policy_resolution"]["language"] == "python"
     assert payload["policy_resolution"]["framework"] == "fastapi"
+    assert payload["policy_resolution"]["framework_confidence"] >= 0.7
     assert payload["policy_resolution"]["disabled"]["django_template_scan"] == "framework_incompatible"
 
 
@@ -264,6 +266,7 @@ def test_flask_policy_resolution_disables_django_scanners(tmp_path: Path) -> Non
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["policy_resolution"]["framework"] == "flask"
+    assert payload["policy_resolution"]["framework_confidence"] >= 0.7
     assert payload["policy_resolution"]["disabled"]["django_settings_scan"] == "framework_incompatible"
 
 
@@ -278,6 +281,7 @@ def test_django_policy_resolution_enables_django_scanners(tmp_path: Path) -> Non
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["policy_resolution"]["framework"] == "django"
+    assert payload["policy_resolution"]["framework_confidence"] >= 0.95
     assert "django_template_scan" in payload["policy_resolution"]["enabled"]
 
 
@@ -319,7 +323,7 @@ def test_unsupported_scanner_contract_fails_closed(tmp_path: Path) -> None:
     (project / "app.py").write_text("x = 1\n")
     (project / ".codegauge.toml").write_text('enabled_scanners = ["pyright"]\n')
     result = runner.invoke(app, ["scan", str(project), "--json"])
-    assert result.exit_code == 0
+    assert result.exit_code == 4
     payload = json.loads(result.stdout)
     assert payload["scanner_stats"][0]["error_code"] == "scanner_contract_violation"
 

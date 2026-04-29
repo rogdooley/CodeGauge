@@ -76,7 +76,7 @@ def test_extract_from_scan_results_uses_generic_fallback_and_skips_failed_scanne
         _result("bandit", [_finding(tool="bandit", category=Category.security, severity=Severity.high)], success=False),
     ]
 
-    metrics = extractor.extract_from_scan_results(results)
+    metrics = extractor.extract_from_scan_results(results, dedupe=False)
     assert len(metrics) == 3
     categories = {metric.category for metric in metrics}
     assert categories == {ScoreCategory.maintainability, ScoreCategory.security, ScoreCategory.typing}

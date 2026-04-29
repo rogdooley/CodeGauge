@@ -5,6 +5,7 @@ import fnmatch
 from pathlib import Path
 from typing import Sequence
 
+from ..constants import ParserErrorCode, ParserRuleId, ScannerErrorCode
 from ..domain.models import ScanResult, Project
 from ..parsers import FindingPathInvalidError, ScannerOutputInvalidError, ScannerParseError
 from .report_normalizer import parser_finding
@@ -22,30 +23,6 @@ class ScanOrchestrator:
         for scanner in self.registry.enabled_scanners([lang.value for lang in project.language_hints]):
             started_at = datetime.now(UTC)
             scanner_files = self._scanner_input_files(project, scanner.supported_languages)
-            if not scanner_files:
-                completed_at = datetime.now(UTC)
-                duration_ms = (completed_at - started_at).total_seconds() * 1000
-                results.append(
-                    ScanResult(
-                        scanner_name=scanner.scanner_name,
-                        started_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=duration_ms,
-                        findings=[],
-                        success=True,
-                        metadata={
-                            "error_code": None,
-                            "command": None,
-                            "stdout": "",
-                            "stderr": "",
-                            "exit_code": None,
-                            "duration_ms": duration_ms,
-                            "scanner_input_file_count": 0,
-                            "skipped_reason": "no_candidate_files",
-                        },
-                    )
-                )
-                continue
             if not scanner.is_available():
                 attempted_command = None
                 try:
@@ -61,10 +38,10 @@ class ScanOrchestrator:
                         duration_ms=(completed_at - started_at).total_seconds() * 1000,
                         findings=[],
                         success=False,
-                        error_code="scanner_binary_missing",
+                        error_code=ScannerErrorCode.binary_missing,
                         error=f"scanner binary not found: {scanner.scanner_name}",
                         metadata={
-                            "error_code": "scanner_binary_missing",
+                            "error_code": ScannerErrorCode.binary_missing,
                             "command": attempted_command,
                             "stdout": "",
                             "stderr": "",
@@ -89,10 +66,10 @@ class ScanOrchestrator:
                         duration_ms=duration_ms,
                         findings=[],
                         success=False,
-                        error_code="scanner_config_error",
+                        error_code=ScannerErrorCode.config_error,
                         error=f"scanner execution failed: {exc}",
                         metadata={
-                            "error_code": "scanner_config_error",
+                            "error_code": ScannerErrorCode.config_error,
                             "command": None,
                             "stdout": "",
                             "stderr": "",
@@ -114,7 +91,7 @@ class ScanOrchestrator:
                 parser = self.parser_registry.get(scanner.scanner_name)
                 if parser is None:
                     parse_error = f"parser not registered for scanner: {scanner.scanner_name}"
-                    parse_error_code = "scanner_parser_missing"
+                    parse_error_code = ParserErrorCode.parser_missing
                 else:
                     try:
                         findings = list(parser.parse(command_result.stdout, command_result.stderr, project.path))
@@ -127,7 +104,7 @@ class ScanOrchestrator:
                         findings = [
                             parser_finding(
                                 tool=scanner.scanner_name,
-                                rule_id="CODEGAUGE.PARSER.INVALID_PATH",
+                                rule_id=ParserRuleId.invalid_path,
                                 message=f"invalid finding path from scanner '{scanner.scanner_name}'",
                                 raw_payload=exc.raw_payload,
                             )
@@ -139,7 +116,7 @@ class ScanOrchestrator:
                         findings = [
                             parser_finding(
                                 tool=scanner.scanner_name,
-                                rule_id="CODEGAUGE.PARSER.SCHEMA_ERROR",
+                                rule_id=ParserRuleId.schema_error,
                                 message=f"scanner output invalid for '{scanner.scanner_name}': {exc}",
                             )
                         ]
@@ -150,7 +127,7 @@ class ScanOrchestrator:
                         findings = [
                             parser_finding(
                                 tool=scanner.scanner_name,
-                                rule_id="CODEGAUGE.PARSER.UNHANDLED",
+                                rule_id=ParserRuleId.unhandled,
                                 message=f"scanner output parsing failed for '{scanner.scanner_name}': {exc}",
                             )
                         ]
@@ -161,7 +138,7 @@ class ScanOrchestrator:
                         findings = [
                             parser_finding(
                                 tool=scanner.scanner_name,
-                                rule_id="CODEGAUGE.PARSER.UNHANDLED",
+                                rule_id=ParserRuleId.unhandled,
                                 message=f"unexpected parser failure for '{scanner.scanner_name}': {exc}",
                             )
                         ]
@@ -193,7 +170,7 @@ class ScanOrchestrator:
                         "remediation": (
                             f"Register parser '{self.parser_registry.expected_parser(scanner.scanner_name)}' "
                             f"for scanner '{scanner.scanner_name}'."
-                            if error_code == "scanner_parser_missing"
+                            if error_code == ParserErrorCode.parser_missing
                             else None
                         ),
                         **(dict(command_result.metadata) if command_result.metadata else {}),

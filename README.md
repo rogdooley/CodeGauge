@@ -14,7 +14,12 @@ and generates static leadership-friendly reports without depending on CI.
   - `0` = `pass`
   - `1` = `warn`
   - `2` = `fail`
-  - `3` = execution/internal failure
+  - execution failures use fixed taxonomy:
+    - `3` = config error
+    - `4` = scanner failure
+    - `5` = parser failure
+    - `6` = internal error
+    - `7` = interrupted
 - `codegauge build-site [path]` generates static leadership-friendly HTML from persisted report artifacts.
 - `codegauge prune-reports [path] --keep N [--dry-run]` prunes historical scans while keeping the newest N per project.
 - `codegauge prune-reports [path] --days N [--dry-run]` prunes scans older than N days per project.

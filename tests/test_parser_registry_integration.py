@@ -17,7 +17,7 @@ class RegistryRuffScanner(RuffScanner):
     def is_available(self) -> bool:
         return True
 
-    def build_command(self, project_path: Path) -> list[str]:
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
         return [
             sys.executable,
             "-c",
@@ -29,7 +29,7 @@ class RegistryBanditScanner(BanditScanner):
     def is_available(self) -> bool:
         return True
 
-    def build_command(self, project_path: Path) -> list[str]:
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
         return [
             sys.executable,
             "-c",
@@ -38,6 +38,9 @@ class RegistryBanditScanner(BanditScanner):
 
 
 def test_registry_integration_for_ruff_and_bandit(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "app.py").write_text("import os\nassert True\n")
     project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])
     scanner_registry = ScannerRegistry([RegistryRuffScanner(), RegistryBanditScanner()])
     parser_registry = ParserRegistry([RuffParser(), BanditParser()])

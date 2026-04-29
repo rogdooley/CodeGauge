@@ -83,7 +83,7 @@ class BadOutputRuffScanner(RuffScanner):
     def is_available(self) -> bool:
         return True
 
-    def build_command(self, project_path: Path) -> list[str]:
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
         return [sys.executable, "-c", "print('this is not json')"]
 
 
@@ -91,7 +91,7 @@ class GoodOutputRuffScanner(RuffScanner):
     def is_available(self) -> bool:
         return True
 
-    def build_command(self, project_path: Path) -> list[str]:
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
         return [
             sys.executable,
             "-c",
@@ -100,6 +100,7 @@ class GoodOutputRuffScanner(RuffScanner):
 
 
 def test_orchestrator_parses_ruff_findings(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("import os\n")
     scanner = GoodOutputRuffScanner()
     registry = ScannerRegistry([scanner])
     orchestrator = ScanOrchestrator(registry, ParserRegistry([RuffParser()]))
@@ -111,21 +112,23 @@ def test_orchestrator_parses_ruff_findings(tmp_path: Path) -> None:
 
 
 def test_malformed_ruff_json_produces_output_invalid_error(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("import os\n")
     scanner = BadOutputRuffScanner()
     registry = ScannerRegistry([scanner])
     orchestrator = ScanOrchestrator(registry, ParserRegistry([RuffParser()]))
     results = orchestrator.run(_python_project(tmp_path))
     assert len(results) == 1
-    assert results[0].success is False
-    assert results[0].error_code == "scanner_output_invalid"
-    assert results[0].metadata["error_code"] == "scanner_output_invalid"
+    assert results[0].success is True
+    assert results[0].error_code is None
+    assert len(results[0].findings) == 1
+    assert results[0].findings[0].rule_id == "CODEGAUGE.PARSER.SCHEMA_ERROR"
 
 
 class BadPathRuffScanner(RuffScanner):
     def is_available(self) -> bool:
         return True
 
-    def build_command(self, project_path: Path) -> list[str]:
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
         outside = (project_path.parent / "outside.py").resolve()
         return [
             sys.executable,
@@ -135,13 +138,14 @@ class BadPathRuffScanner(RuffScanner):
 
 
 def test_invalid_finding_path_results_in_failed_scan(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("import os\n")
     scanner = BadPathRuffScanner()
     registry = ScannerRegistry([scanner])
     orchestrator = ScanOrchestrator(registry, ParserRegistry([RuffParser()]))
     results = orchestrator.run(_python_project(tmp_path))
     assert len(results) == 1
-    assert results[0].success is False
-    assert results[0].error_code == "finding_path_invalid"
+    assert results[0].success is True
+    assert results[0].error_code is None
     assert results[0].metadata.get("invalid_finding_count") == 1
     invalid_payload = results[0].metadata.get("invalid_finding_payload")
     assert isinstance(invalid_payload, dict)

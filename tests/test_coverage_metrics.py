@@ -24,6 +24,12 @@ class StubCoverageScanner(CoverageScanner):
             "import json; print(json.dumps({'totals': {'percent_covered': 77.7}}))",
         ]
 
+    def supports_explicit_file_list(self) -> bool:
+        return True
+
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
+        return self.build_command(project_path)
+
 
 def test_coverage_metric_flows_to_scoring_inputs(tmp_path: Path) -> None:
     project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])

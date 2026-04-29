@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import fnmatch
 
+from ..constants import DisabledReason
 from ..config import CodeGaugeConfig, load_config
 from ..domain.models import Project
 from ..parsers import (
@@ -211,10 +212,10 @@ def _resolve_policy(project: Project) -> tuple[str, set[str], dict[str, str]]:
     elif framework in {"fastapi", "flask", "generic"}:
         disabled.update(
             {
-                "django_check_deploy": "framework_incompatible",
-                "django_settings_scan": "framework_incompatible",
-                "django_template_scan": "framework_incompatible",
-                "django_orm_health": "framework_incompatible",
+                "django_check_deploy": DisabledReason.framework_incompatible,
+                "django_settings_scan": DisabledReason.framework_incompatible,
+                "django_template_scan": DisabledReason.framework_incompatible,
+                "django_orm_health": DisabledReason.framework_incompatible,
             }
         )
     return framework, enabled, disabled
@@ -237,8 +238,14 @@ def build_scan_services(path: Path) -> ScanApplicationServices:
     metadata["inventory"] = inventory
     metadata["policy_resolution"] = {
         "framework": framework,
+        "language": str(metadata.get("python_runtime", {}).get("language", "python"))
+        if isinstance(metadata.get("python_runtime"), dict)
+        else "python",
+        "framework_confidence": float(metadata.get("python_runtime", {}).get("framework_confidence", 0.4))
+        if isinstance(metadata.get("python_runtime"), dict)
+        else 0.4,
         "enabled": sorted(policy_enabled),
-        "disabled": dict(sorted(policy_disabled.items())),
+        "disabled": {k: str(v) for k, v in sorted(policy_disabled.items())},
     }
     project = project.model_copy(update={"config": config.model_dump(mode="json"), "metadata": metadata}, deep=True)
 

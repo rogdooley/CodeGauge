@@ -7,6 +7,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping, Sequence
 
+from ..constants import ScannerErrorCode
+
 
 @dataclass
 class ScannerCommandResult:
@@ -60,7 +62,7 @@ class Scanner(ABC):
                     stderr="",
                     success=False,
                     duration_ms=0.0,
-                    error_code="scanner_contract_violation",
+                    error_code=ScannerErrorCode.contract_violation,
                     error=f"scanner does not support explicit file-list execution: {self.scanner_name}",
                 )
             command = self.build_command_for_files(project_path, files)
@@ -85,7 +87,7 @@ class Scanner(ABC):
                 success=completed.returncode == 0,
                 duration_ms=duration,
                 exit_code=completed.returncode,
-                error_code=None if completed.returncode == 0 else "scanner_nonzero_exit",
+                error_code=None if completed.returncode == 0 else ScannerErrorCode.nonzero_exit,
                 error=None if completed.returncode == 0 else f"scanner exited with code {completed.returncode}",
             )
         except subprocess.TimeoutExpired as exc:
@@ -96,7 +98,7 @@ class Scanner(ABC):
                 stderr=exc.stderr or "",
                 success=False,
                 duration_ms=duration,
-                error_code="scanner_timeout",
+                error_code=ScannerErrorCode.timeout,
                 error=f"scanner timed out after {self.timeout_seconds} seconds",
             )
         except FileNotFoundError:
@@ -108,7 +110,7 @@ class Scanner(ABC):
                 stderr="",
                 success=False,
                 duration_ms=duration,
-                error_code="scanner_binary_missing",
+                error_code=ScannerErrorCode.binary_missing,
                 error=f"scanner binary not found: {binary}",
             )
         except OSError as exc:
@@ -119,6 +121,6 @@ class Scanner(ABC):
                 stderr="",
                 success=False,
                 duration_ms=duration,
-                error_code="scanner_config_error",
+                error_code=ScannerErrorCode.config_error,
                 error=f"scanner execution failed: {exc}",
             )

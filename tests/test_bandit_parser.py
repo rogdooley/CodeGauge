@@ -56,7 +56,7 @@ class GoodOutputBanditScanner(BanditScanner):
     def is_available(self) -> bool:
         return True
 
-    def build_command(self, project_path: Path) -> list[str]:
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
         return [
             sys.executable,
             "-c",
@@ -65,6 +65,7 @@ class GoodOutputBanditScanner(BanditScanner):
 
 
 def test_orchestrator_parses_bandit_findings(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("assert True\n")
     project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])
     registry = ScannerRegistry([GoodOutputBanditScanner()])
     orchestrator = ScanOrchestrator(registry, ParserRegistry([BanditParser()]))
