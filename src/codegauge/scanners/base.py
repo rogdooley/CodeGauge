@@ -27,6 +27,7 @@ class Scanner(ABC):
     scanner_name: str
     supported_languages: Sequence[str]
     timeout_seconds: int = 120
+    state_root: Path | None = None
 
     def __init__(
         self,

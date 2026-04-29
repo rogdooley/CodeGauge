@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from pydantic import ValidationError
 
+from ..paths import default_report_root, default_state_root
 from .schema import CodeGaugeConfig, DEFAULT_SCANNER_NAMES
 
 
@@ -14,17 +15,19 @@ class ConfigLoadError(ValueError):
     """Raised when config loading or validation fails."""
 
 
-DEFAULT_CONFIG: dict[str, Any] = {
-    "reports_dir": ".codegauge/reports",
-    "site_dir": ".codegauge/site",
-    "default_timeout_seconds": 120,
-    "exclude": [],
-    "enabled_scanners": [],
-    "disabled_scanners": [],
-    "scanners": {},
-    "thresholds": {},
-    "payload": {},
-}
+def _default_config() -> dict[str, Any]:
+    return {
+        "report_root": str(default_report_root()),
+        "state_root": str(default_state_root()),
+        "open_report": False,
+        "default_timeout_seconds": 120,
+        "exclude": [],
+        "enabled_scanners": [],
+        "disabled_scanners": [],
+        "scanners": {},
+        "thresholds": {},
+        "payload": {},
+    }
 
 
 def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -73,13 +76,26 @@ def load_config(
     global_config_path = Path("~/.config/codegauge/config.toml").expanduser()
     project_config_path = project_root / ".codegauge.toml"
 
-    merged: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG)
+    merged: dict[str, Any] = copy.deepcopy(_default_config())
+    explicit_report_root = False
+    explicit_state_root = False
     for source in (
         _read_toml(global_config_path),
         _read_toml(project_config_path),
         dict(overrides or {}),
     ):
+        if "report_root" in source:
+            explicit_report_root = True
+        if "state_root" in source:
+            explicit_state_root = True
         merged = _deep_merge(merged, source)
+
+    if not explicit_report_root and isinstance(merged.get("reports_dir"), (str, Path)):
+        merged["report_root"] = str(merged["reports_dir"])
+    if not explicit_state_root and isinstance(merged.get("site_dir"), (str, Path)):
+        merged["state_root"] = str(default_state_root())
+    merged.pop("reports_dir", None)
+    merged.pop("site_dir", None)
 
     scanner_names = known_scanners if known_scanners is not None else set(DEFAULT_SCANNER_NAMES)
     try:

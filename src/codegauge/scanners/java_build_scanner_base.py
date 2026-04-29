@@ -9,6 +9,7 @@ from typing import Sequence
 
 from ..services.build_runner import BuildRunner, select_build_runner
 from ..storage import JavaBuildCacheService
+from ..paths import java_cache_root_for_project
 from .base import Scanner, ScannerCommandResult
 
 
@@ -86,7 +87,11 @@ class JavaBuildArtifactScanner(Scanner):
             artifact_relative_paths=self._artifacts_for_runner(runner),
             extra_args=self.extra_args,
         )
-        cache_service = JavaBuildCacheService(project_path)
+        state_root = self.state_root.resolve() if isinstance(self.state_root, Path) else (project_path / ".scan-cache").resolve()
+        cache_service = JavaBuildCacheService(
+            project_path,
+            cache_root=java_cache_root_for_project(state_root, project_path),
+        )
         modules = cache_service.discover_modules()
         cache_hits = 0
         cache_misses = 0

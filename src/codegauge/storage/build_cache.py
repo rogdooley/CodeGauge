@@ -57,9 +57,10 @@ class JavaBuildCacheService:
         "gradle.lockfile",
     )
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, *, cache_root: Path | None = None) -> None:
         self.project_root = project_root
-        self.cache_root = project_root / ".scan-cache" / "java" / "modules"
+        self.cache_root = cache_root or (project_root / ".scan-cache" / "java" / "modules")
+        self.cache_root.mkdir(parents=True, exist_ok=True)
 
     def discover_modules(self) -> list[JavaModule]:
         module_dirs: set[Path] = set()

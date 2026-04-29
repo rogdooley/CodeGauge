@@ -90,10 +90,11 @@ class PayloadConfig(BaseModel):
 class CodeGaugeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    path_fields: ClassVar[tuple[str, ...]] = ("reports_dir", "site_dir")
+    path_fields: ClassVar[tuple[str, ...]] = ("report_root", "state_root")
 
-    reports_dir: Path = Path(".codegauge/reports")
-    site_dir: Path = Path(".codegauge/site")
+    report_root: Path
+    state_root: Path
+    open_report: bool = False
     default_timeout_seconds: int = Field(default=120, ge=1)
     exclude: list[str] = Field(default_factory=list)
     enabled_scanners: list[str] = Field(default_factory=list)

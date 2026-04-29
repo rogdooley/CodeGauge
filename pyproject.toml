@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-codegauge = "codegauge.cli:app"
+codegauge = "codegauge.main:main"
 
 [build-system]
 requires = ["hatchling>=1.26"]

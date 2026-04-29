@@ -168,6 +168,7 @@ def _apply_scanner_config(scanner_registry: ScannerRegistry, config: CodeGaugeCo
             extra_args = scanner_settings.extra_args
         scanner.timeout_seconds = timeout_seconds
         scanner.extra_args = list(extra_args)
+        scanner.state_root = config.state_root
     enabled = set(config.enabled_scanners) or None
     return ScannerRegistry(scanner_registry.scanners, enabled_names=enabled, disabled_names=disabled)
 
@@ -228,6 +229,20 @@ def load_resolved_config(project_path: Path) -> CodeGaugeConfig:
     return load_config(project_path=project_path, known_scanners=known_scanners)
 
 
+def load_resolved_config_with_overrides(project_path: Path, *, report_root: Path | None = None, state_root: Path | None = None, open_report: bool | None = None) -> CodeGaugeConfig:
+    scanner_registry = ScannerRegistry([])
+    register_builtin_scanners(scanner_registry)
+    known_scanners = {scanner.scanner_name for scanner in scanner_registry.scanners}
+    overrides: dict[str, object] = {}
+    if report_root is not None:
+        overrides["report_root"] = str(report_root)
+    if state_root is not None:
+        overrides["state_root"] = str(state_root)
+    if open_report is not None:
+        overrides["open_report"] = open_report
+    return load_config(project_path=project_path, known_scanners=known_scanners, overrides=overrides)
+
+
 def build_scan_services(path: Path) -> ScanApplicationServices:
     project_path = path.expanduser().resolve()
     config = load_resolved_config(project_path)
@@ -262,6 +277,49 @@ def build_scan_services(path: Path) -> ScanApplicationServices:
     parser_registry = ParserRegistry()
     register_builtin_parsers(parser_registry)
 
+    orchestrator = ScanOrchestrator(scanner_registry, parser_registry)
+    return ScanApplicationServices(
+        project_path=project_path,
+        project=project,
+        config=config,
+        scanner_registry=scanner_registry,
+        parser_registry=parser_registry,
+        orchestrator=orchestrator,
+    )
+
+
+def build_scan_services_with_config(path: Path, config: CodeGaugeConfig) -> ScanApplicationServices:
+    project_path = path.expanduser().resolve()
+    project = ProjectDiscoveryService(ProfileRegistry.with_builtins()).discover(project_path)
+    framework, policy_enabled, policy_disabled = _resolve_policy(project)
+    inventory = _build_inventory(project_path, config.exclude)
+    metadata = dict(project.metadata)
+    metadata["inventory"] = inventory
+    metadata["policy_resolution"] = {
+        "framework": framework,
+        "language": str(metadata.get("python_runtime", {}).get("language", "python"))
+        if isinstance(metadata.get("python_runtime"), dict)
+        else "python",
+        "framework_confidence": float(metadata.get("python_runtime", {}).get("framework_confidence", 0.4))
+        if isinstance(metadata.get("python_runtime"), dict)
+        else 0.4,
+        "enabled": sorted(policy_enabled),
+        "disabled": {k: str(v) for k, v in sorted(policy_disabled.items())},
+    }
+    project = project.model_copy(update={"config": config.model_dump(mode="json"), "metadata": metadata}, deep=True)
+
+    scanner_registry = ScannerRegistry([])
+    register_builtin_scanners(scanner_registry)
+    scanner_registry = _apply_scanner_config(scanner_registry, config)
+    if policy_disabled:
+        scanner_registry = ScannerRegistry(
+            scanner_registry.scanners,
+            enabled_names=scanner_registry.enabled_names,
+            disabled_names=scanner_registry.disabled_names.union(policy_disabled.keys()),
+        )
+
+    parser_registry = ParserRegistry()
+    register_builtin_parsers(parser_registry)
     orchestrator = ScanOrchestrator(scanner_registry, parser_registry)
     return ScanApplicationServices(
         project_path=project_path,
