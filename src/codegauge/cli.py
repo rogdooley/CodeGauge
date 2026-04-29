@@ -338,6 +338,15 @@ def scan(
             "global": dict(sorted(parser_summary_global.items())),
             "per_scanner": dict(sorted(parser_summary_scanners.items())),
         }
+        summary_payload["scanner_stats"] = [
+            {
+                "scanner_name": result.scanner_name,
+                "scanner_input_file_count": int(result.metadata.get("scanner_input_file_count", 0) or 0),
+                "success": result.success,
+                "error_code": result.error_code,
+            }
+            for result in results
+        ]
         summary_payload["inventory"] = inventory
         summary_payload["policy_resolution"] = policy_resolution
         summary_payload["payload_debug_mode"] = {

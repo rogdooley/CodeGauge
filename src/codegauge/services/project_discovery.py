@@ -46,6 +46,8 @@ _DJANGO_SETTINGS_RE = re.compile(
     re.IGNORECASE,
 )
 _DJANGO_ORM_RE = re.compile(r"\b(models\.|Model\)|select_related\(|prefetch_related\(|db_index=)", re.IGNORECASE)
+_FASTAPI_RE = re.compile(r"\b(fastapi|FastAPI|APIRouter)\b")
+_FLASK_RE = re.compile(r"\b(flask|Flask|Blueprint)\b")
 
 _JS_FRAMEWORK_MARKERS: dict[str, tuple[str, ...]] = {
     "react": ("react", "react-dom", "next"),
@@ -87,6 +89,11 @@ class ProjectDiscoveryService:
         django_meta = self._discover_django_metadata(path)
         if django_meta is not None:
             metadata["django"] = django_meta
+            metadata["python_framework"] = "django"
+        else:
+            framework = self._detect_python_framework(path)
+            if framework is not None:
+                metadata["python_framework"] = framework
 
         js_meta = self._discover_js_metadata(path)
         if js_meta is not None:
@@ -102,6 +109,14 @@ class ProjectDiscoveryService:
                 language_hints.append(Language.general)
 
         return Project(name=path.name, path=path, language_hints=language_hints, metadata=metadata)
+
+    def _detect_python_framework(self, root: Path) -> str | None:
+        py_sources = list(root.rglob("*.py"))[:2000]
+        if self._files_match(py_sources, _FASTAPI_RE):
+            return "fastapi"
+        if self._files_match(py_sources, _FLASK_RE):
+            return "flask"
+        return None
 
     @staticmethod
     def _is_python_project(root: Path) -> bool:

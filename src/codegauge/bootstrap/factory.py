@@ -205,12 +205,10 @@ def _build_inventory(project_root: Path, excludes: list[str]) -> dict[str, int]:
 def _resolve_policy(project: Project) -> tuple[str, set[str], dict[str, str]]:
     disabled: dict[str, str] = {}
     enabled: set[str] = set()
-    framework = "generic"
-    if isinstance(project.metadata.get("django"), dict):
-        framework = "django"
+    framework = str(project.metadata.get("python_framework", "generic"))
+    if framework == "django":
         enabled.update({"django_check_deploy", "django_settings_scan", "django_template_scan", "django_orm_health"})
-    elif (project.path / "pyproject.toml").exists():
-        framework = "fastapi"
+    elif framework in {"fastapi", "flask", "generic"}:
         disabled.update(
             {
                 "django_check_deploy": "framework_incompatible",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Sequence
 
 from codegauge.domain.models import Finding
 from codegauge.domain.models import Language, Project
@@ -28,8 +29,15 @@ class CommandScanner(Scanner):
     def build_command(self, project_path: Path) -> list[str]:
         return self._command
 
+    def supports_explicit_file_list(self) -> bool:
+        return True
+
+    def build_command_for_files(self, project_path: Path, files: Sequence[Path]) -> list[str]:
+        return self._command
+
 
 def _project(path: Path) -> Project:
+    (path / "sample.py").write_text("x = 1\n")
     return Project(name=path.name, path=path, language_hints=[Language.python])
 
 
@@ -39,6 +47,17 @@ class CommandParser(ScannerParser):
 
     def parse(self, stdout: str, stderr: str, project_path: Path) -> list[Finding]:
         return []
+
+
+class LegacyScanner(Scanner):
+    scanner_name = "legacy"
+    supported_languages = ["python"]
+
+    def is_available(self) -> bool:
+        return True
+
+    def build_command(self, project_path: Path) -> list[str]:
+        return [sys.executable, "-c", "print('legacy')"]
 
 
 class BrokenPathParser(ScannerParser):
@@ -125,3 +144,13 @@ def test_invalid_finding_isolated_as_parser_finding(tmp_path: Path) -> None:
     assert results[0].metadata["invalid_finding_count"] == 1
     assert len(results[0].findings) == 1
     assert results[0].findings[0].rule_id == "CODEGAUGE.PARSER.INVALID_PATH"
+
+
+def test_scanner_contract_violation_fails_closed(tmp_path: Path) -> None:
+    scanner = LegacyScanner()
+    registry = ScannerRegistry([scanner])
+    orchestrator = ScanOrchestrator(registry, ParserRegistry([CommandParser()]))
+    results = orchestrator.run(_project(tmp_path))
+    assert len(results) == 1
+    assert results[0].success is False
+    assert results[0].error_code == "scanner_contract_violation"

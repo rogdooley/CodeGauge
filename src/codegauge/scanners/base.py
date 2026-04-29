@@ -45,8 +45,27 @@ class Scanner(ABC):
     def build_command(self, project_path: Path) -> list[str]:
         ...
 
-    def execute(self, project_path: Path) -> ScannerCommandResult:
-        command = self.build_command(project_path)
+    def supports_explicit_file_list(self) -> bool:
+        return False
+
+    def build_command_for_files(self, project_path: Path, files: Sequence[Path]) -> list[str]:
+        raise NotImplementedError(f"{self.scanner_name} does not implement explicit file-list execution")
+
+    def execute(self, project_path: Path, files: Sequence[Path] | None = None) -> ScannerCommandResult:
+        if files is not None:
+            if not self.supports_explicit_file_list():
+                return ScannerCommandResult(
+                    command=[],
+                    stdout="",
+                    stderr="",
+                    success=False,
+                    duration_ms=0.0,
+                    error_code="scanner_contract_violation",
+                    error=f"scanner does not support explicit file-list execution: {self.scanner_name}",
+                )
+            command = self.build_command_for_files(project_path, files)
+        else:
+            command = self.build_command(project_path)
         start = perf_counter()
         try:
             completed = subprocess.run(

@@ -59,10 +59,13 @@ def test_scan_json_fails_closed_when_no_scanners_resolved(tmp_path: Path) -> Non
     assert "no scanners resolved for project" in result.stderr
 
 
-def test_scan_human_output_shows_java_cache_summary(tmp_path: Path, monkeypatch) -> None:
+def test_scan_human_output_shows_contract_violation_for_unsupported_scanner(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "proj2_java"
     project.mkdir()
     (project / "pom.xml").write_text("<project/>")
+    src = project / "src" / "main" / "java"
+    src.mkdir(parents=True)
+    (src / "App.java").write_text("class App {}\n")
     (project / ".codegauge.toml").write_text('enabled_scanners = ["spotbugs"]\n')
 
     def fake_run(*args, **kwargs):
@@ -78,8 +81,8 @@ def test_scan_human_output_shows_java_cache_summary(tmp_path: Path, monkeypatch)
     monkeypatch.setattr("codegauge.scanners.java_build_scanner_base.subprocess.run", fake_run)
     result = runner.invoke(app, ["scan", str(project)])
     assert result.exit_code == 0
-    assert "Java cache: 0 hits / 1 misses" in result.stdout
-    assert "Miss reasons: manifest_missing=1" in result.stdout
+    assert "Policy status: FAIL" in result.stdout
+    assert "Policy reasons: scanner_failure" in result.stdout
 
 
 def test_scan_json_output_shape(tmp_path: Path) -> None:
@@ -99,6 +102,10 @@ def test_scan_json_output_shape(tmp_path: Path) -> None:
     assert payload["message_normalizer_version"] == "1"
     assert "report_sha256" in payload
     assert "parser_summary" in payload
+    assert "scanner_stats" in payload
+    assert isinstance(payload["scanner_stats"], list)
+    assert "policy_resolution" in payload
+    assert "framework" in payload["policy_resolution"]
     assert "global" in payload["parser_summary"]
     assert "per_scanner" in payload["parser_summary"]
     assert "finding_count" in payload
@@ -232,6 +239,89 @@ def test_scan_fail_on_policy_exit_code_internal(monkeypatch) -> None:
     monkeypatch.setattr("codegauge.cli.build_scan_services", explode)
     result = runner.invoke(app, ["scan", ".", "--fail-on-policy"])
     assert result.exit_code == 3
+
+
+def test_fastapi_policy_resolution_disables_django_scanners(tmp_path: Path) -> None:
+    project = tmp_path / "fastapi_proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / "main.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["policy_resolution"]["framework"] == "fastapi"
+    assert payload["policy_resolution"]["disabled"]["django_template_scan"] == "framework_incompatible"
+
+
+def test_flask_policy_resolution_disables_django_scanners(tmp_path: Path) -> None:
+    project = tmp_path / "flask_proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / "app.py").write_text("from flask import Flask\napp = Flask(__name__)\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["policy_resolution"]["framework"] == "flask"
+    assert payload["policy_resolution"]["disabled"]["django_settings_scan"] == "framework_incompatible"
+
+
+def test_django_policy_resolution_enables_django_scanners(tmp_path: Path) -> None:
+    project = tmp_path / "django_proj"
+    project.mkdir()
+    (project / "manage.py").write_text("import os\nos.environ['DJANGO_SETTINGS_MODULE']='x.settings'\n")
+    (project / "settings.py").write_text("INSTALLED_APPS = []\nDEBUG = True\n")
+    (project / "views.py").write_text("from django.http import HttpResponse\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["policy_resolution"]["framework"] == "django"
+    assert "django_template_scan" in payload["policy_resolution"]["enabled"]
+
+
+def test_venv_files_are_excluded_from_scanner_input(tmp_path: Path) -> None:
+    project = tmp_path / "venv_proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / "app.py").write_text("x = 1\n")
+    (project / ".venv").mkdir()
+    (project / ".venv" / "ignored.py").write_text("y = 2\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    stats = {row["scanner_name"]: row for row in payload["scanner_stats"]}
+    assert stats["ruff"]["scanner_input_file_count"] == 1
+
+
+def test_disabled_scanner_not_executed(tmp_path: Path) -> None:
+    project = tmp_path / "disabled_proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / "app.py").write_text("x = 1\n")
+    (project / ".codegauge.toml").write_text(
+        'enabled_scanners = ["ruff"]\ndisabled_scanners = ["bandit"]\n'
+    )
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    scanner_names = {row["scanner_name"] for row in payload["scanner_stats"]}
+    assert "ruff" in scanner_names
+    assert "bandit" not in scanner_names
+
+
+def test_unsupported_scanner_contract_fails_closed(tmp_path: Path) -> None:
+    project = tmp_path / "contract_proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / "app.py").write_text("x = 1\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["pyright"]\n')
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["scanner_stats"][0]["error_code"] == "scanner_contract_violation"
 
 
 def test_compact_opengrep_raw_output_omits_large_stdout() -> None:
