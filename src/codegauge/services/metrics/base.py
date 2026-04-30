@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
-from ...domain.models import Category, Finding, ScanResult, Severity
+from ...domain.models import Category, ScanResult, Severity
 from ...scoring.models import NormalizedMetric, ScoreCategory
 
 
@@ -29,15 +29,22 @@ class FindingMetricProvider(MetricProvider):
 
     def extract(self, scan_result: ScanResult) -> Sequence[NormalizedMetric]:
         counts: dict[tuple[ScoreCategory, str], int] = defaultdict(int)
+        weighted_counts: dict[tuple[ScoreCategory, str], float] = defaultdict(float)
         for finding in scan_result.findings:
             category = self._to_score_category(finding.category)
-            counts[(category, finding.severity.value)] += 1
+            if category is None:
+                continue
+            key = (category, finding.severity.value)
+            counts[key] += 1
+            weight = finding.score_weight if category == ScoreCategory.security else 1.0
+            weighted_counts[key] += max(0.0, float(weight))
 
         return [
             NormalizedMetric(
                 category=category,
                 severity=Severity(severity),
                 count=count,
+                weighted_count=weighted_counts[(category, severity)],
                 score_hint=self._score_hint(scan_result.scanner_name, category),
                 source=scan_result.scanner_name,
             )
@@ -45,7 +52,9 @@ class FindingMetricProvider(MetricProvider):
         ]
 
     @staticmethod
-    def _to_score_category(category: Category) -> ScoreCategory:
+    def _to_score_category(category: Category) -> ScoreCategory | None:
+        if category == Category.system_parser:
+            return None
         return ScoreCategory(category.value)
 
     @staticmethod

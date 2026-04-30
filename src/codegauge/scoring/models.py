@@ -38,6 +38,7 @@ class NormalizedMetric(BaseModel):
     category: ScoreCategory
     severity: Severity
     count: int = Field(ge=0)
+    weighted_count: float | None = Field(default=None, ge=0)
     score_hint: float = Field(ge=0)
     source: str
     scalar_name: str | None = None

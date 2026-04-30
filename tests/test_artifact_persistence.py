@@ -38,7 +38,18 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     assert len(scan_dirs) == 1
     scan_dir = scan_dirs[0]
 
-    for file_name in ["summary.json", "findings.json", "score.json", "policy.json", "run_manifest.json"]:
+    for file_name in [
+        "summary.json",
+        "findings.json",
+        "score.json",
+        "policy.json",
+        "run_manifest.json",
+        "action-plan.json",
+        "inventory.json",
+        "policy-resolution.json",
+        "report.html",
+        "details.html",
+    ]:
         assert (scan_dir / file_name).exists()
     raw_files = list((scan_dir / "raw").glob("*.json"))
     assert raw_files
@@ -54,6 +65,7 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     findings_payload = json.loads((scan_dir / "findings.json").read_text())
     policy_payload = json.loads((scan_dir / "policy.json").read_text())
     score_payload = json.loads((scan_dir / "score.json").read_text())
+    action_plan_payload = json.loads((scan_dir / "action-plan.json").read_text())
 
     assert summary_payload["project"] == "artifact-project"
     assert "score_card" in summary_payload
@@ -61,9 +73,28 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
     assert "inventory" in summary_payload
     assert "policy_resolution" in summary_payload
     assert "parser_summary" in summary_payload
+    assert "security_summary" in summary_payload
+    assert "classifier" in summary_payload
     assert "report_sha256" in summary_payload
+    assert summary_payload["classifier"]["name"] == "security_classifier"
     assert "status" in policy_payload
     assert "overall_score" in score_payload
+    for section in (
+        "top_recommendations",
+        "quick_wins",
+        "architectural_concerns",
+        "security_concerns",
+        "systemic_issues",
+    ):
+        assert section in action_plan_payload
+        assert isinstance(action_plan_payload[section], list)
+        for item in action_plan_payload.get(section, []):
+            assert "_score" not in item
+    assert action_plan_payload["schema_version"] == "1.0.0"
+    assert action_plan_payload["recommendation_engine_version"] == "1"
+    assert action_plan_payload["ruleset_version"] == "1"
+    assert "generated_from" in action_plan_payload
+    assert set(action_plan_payload["generated_from"].keys()) == {"findings_count", "clusters_count", "source_schema_version"}
     if findings_payload:
         first = findings_payload[0]
         for required in (
@@ -71,6 +102,12 @@ def test_scan_persists_artifacts(tmp_path: Path) -> None:
             "rule_id",
             "native_severity",
             "severity",
+            "security_class",
+            "security_context",
+            "security_impact",
+            "score_weight",
+            "classification_reason",
+            "classification_rule_id",
             "ownership",
             "ownership_confidence",
             "fingerprint",

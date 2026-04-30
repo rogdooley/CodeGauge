@@ -105,9 +105,13 @@ def test_scan_json_output_shape(tmp_path: Path) -> None:
     assert "scanner_stats" in payload
     assert isinstance(payload["scanner_stats"], list)
     assert "policy_resolution" in payload
+    assert "security_summary" in payload
+    assert "classifier" in payload
     assert "framework" in payload["policy_resolution"]
     assert "global" in payload["parser_summary"]
     assert "per_scanner" in payload["parser_summary"]
+    assert payload["classifier"]["name"] == "security_classifier"
+    assert payload["classifier"]["version"] == "1.0.0"
     assert "finding_count" in payload
     assert "invalid_findings" in payload
     assert "invalid_paths" in payload
@@ -128,6 +132,155 @@ def test_scan_json_output_shape(tmp_path: Path) -> None:
     assert "error_code" in payload["results"][0]
     assert "finding_count" in payload["results"][0]
     assert "duration_ms" in payload["results"][0]
+
+
+def test_scan_json_includes_classifier_for_single_bandit_scanner(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_bandit"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+
+    now = datetime.now(UTC)
+    bandit_result = ScanResult(
+        scanner_name="bandit",
+        started_at=now,
+        completed_at=now,
+        duration_ms=1.0,
+        findings=[
+            Finding(
+                tool="bandit",
+                rule_id="B603",
+                severity=Severity.high,
+                category=Category.security,
+                language=Language.python,
+                file=Path("src/app.py"),
+                line=12,
+                message="subprocess call",
+            )
+        ],
+        success=True,
+        metadata={},
+    )
+
+    monkeypatch.setattr("codegauge.services.scan_orchestrator.ScanOrchestrator.run", lambda _self, _project: [bandit_result])
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["classifier"]["name"] == "security_classifier"
+    assert payload["classifier"]["version"] == "1.0.0"
+
+
+def test_scan_json_includes_classifier_for_mixed_scanners(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_mixed"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+
+    now = datetime.now(UTC)
+    results = [
+        ScanResult(
+            scanner_name="bandit",
+            started_at=now,
+            completed_at=now,
+            duration_ms=1.0,
+            findings=[
+                Finding(
+                    tool="bandit",
+                    rule_id="B310",
+                    severity=Severity.medium,
+                    category=Category.security,
+                    language=Language.python,
+                    file=Path("tests/smoke_test.py"),
+                    line=8,
+                    message="urlopen usage",
+                )
+            ],
+            success=True,
+            metadata={},
+        ),
+        ScanResult(
+            scanner_name="opengrep",
+            started_at=now,
+            completed_at=now,
+            duration_ms=1.0,
+            findings=[
+                Finding(
+                    tool="opengrep",
+                    rule_id="SEC.SQLI.1",
+                    severity=Severity.high,
+                    category=Category.security,
+                    language=Language.python,
+                    file=Path("src/db.py"),
+                    line=21,
+                    message="Possible SQL injection",
+                )
+            ],
+            success=True,
+            metadata={},
+        ),
+        ScanResult(
+            scanner_name="ruff",
+            started_at=now,
+            completed_at=now,
+            duration_ms=1.0,
+            findings=[
+                Finding(
+                    tool="ruff",
+                    rule_id="F401",
+                    severity=Severity.low,
+                    category=Category.dead_code,
+                    language=Language.python,
+                    file=Path("src/app.py"),
+                    line=2,
+                    message="unused import",
+                )
+            ],
+            success=True,
+            metadata={},
+        ),
+    ]
+    monkeypatch.setattr("codegauge.services.scan_orchestrator.ScanOrchestrator.run", lambda _self, _project: results)
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["classifier"]["name"] == "security_classifier"
+    assert payload["classifier"]["version"] == "1.0.0"
+
+
+def test_scan_json_includes_classifier_when_no_security_findings(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_no_security"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+
+    now = datetime.now(UTC)
+    lint_result = ScanResult(
+        scanner_name="ruff",
+        started_at=now,
+        completed_at=now,
+        duration_ms=1.0,
+        findings=[
+            Finding(
+                tool="ruff",
+                rule_id="E302",
+                severity=Severity.low,
+                category=Category.lint,
+                language=Language.python,
+                file=Path("src/app.py"),
+                line=1,
+                message="expected 2 blank lines",
+            )
+        ],
+        success=True,
+        metadata={},
+    )
+    monkeypatch.setattr("codegauge.services.scan_orchestrator.ScanOrchestrator.run", lambda _self, _project: [lint_result])
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["classifier"]["name"] == "security_classifier"
+    assert payload["classifier"]["version"] == "1.0.0"
+    assert payload["security_summary"]["by_class"]["runtime_security"] == 0
 
 
 def test_scan_json_verbose_includes_execution_details(tmp_path: Path) -> None:
@@ -233,10 +386,10 @@ def test_scan_fail_on_policy_exit_code_fail(tmp_path: Path, monkeypatch) -> None
 
 
 def test_scan_fail_on_policy_exit_code_internal(monkeypatch) -> None:
-    def explode(_path):
+    def explode(*_args, **_kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("codegauge.cli.build_scan_services", explode)
+    monkeypatch.setattr("codegauge.cli.build_scan_services_with_config", explode)
     result = runner.invoke(app, ["scan", ".", "--fail-on-policy"])
     assert result.exit_code == 6
 
@@ -316,16 +469,17 @@ def test_disabled_scanner_not_executed(tmp_path: Path) -> None:
     assert "bandit" not in scanner_names
 
 
-def test_unsupported_scanner_contract_fails_closed(tmp_path: Path) -> None:
+def test_pyright_scanner_runs_successfully(tmp_path: Path) -> None:
     project = tmp_path / "contract_proj"
     project.mkdir()
     (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
     (project / "app.py").write_text("x = 1\n")
     (project / ".codegauge.toml").write_text('enabled_scanners = ["pyright"]\n')
     result = runner.invoke(app, ["scan", str(project), "--json"])
-    assert result.exit_code == 4
+    assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["scanner_stats"][0]["error_code"] == "scanner_contract_violation"
+    assert payload["scanner_stats"][0]["scanner_name"] == "pyright"
+    assert payload["scanner_stats"][0]["success"] is True
 
 
 def test_compact_opengrep_raw_output_omits_large_stdout() -> None:

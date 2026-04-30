@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC
 from pathlib import Path
 from typing import Any
+import re
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -87,8 +88,13 @@ class StaticSiteBuilder:
         latest = history[-1]
         runs = []
         project_dir = self.report_root / "projects" / project_name
-        for item in reversed(history):
+        chronological = list(history)
+        previous_by_scan_id: dict[str, dict[str, Any] | None] = {}
+        for idx, item in enumerate(chronological):
+            previous_by_scan_id[str(item.get("scan_id"))] = chronological[idx - 1] if idx > 0 else None
+        for item in reversed(chronological):
             scan_dir = Path(item["scan_dir"])
+            prior = previous_by_scan_id.get(str(item.get("scan_id")))
             manifest = item.get("run_manifest", {})
             score = float(manifest.get("score", item.get("score", {}).get("overall_score", 0.0)) or 0.0)
             generated_at = str(manifest.get("generated_at") or "")
@@ -117,8 +123,13 @@ class StaticSiteBuilder:
                     "summary_link": self._relative_link(project_dir / "index.html", scan_dir / "summary.json"),
                     "findings_link": self._relative_link(project_dir / "index.html", scan_dir / "findings.json"),
                     "report_link": self._relative_link(project_dir / "index.html", scan_dir / "report.html"),
+                    "details_link": self._relative_link(project_dir / "index.html", scan_dir / "details.html"),
+                    "action_plan_json_link": self._relative_link(project_dir / "index.html", scan_dir / "action-plan.json"),
+                    "inventory_link": self._relative_link(project_dir / "index.html", scan_dir / "inventory.json"),
+                    "policy_resolution_link": self._relative_link(project_dir / "index.html", scan_dir / "policy-resolution.json"),
                 }
             )
+            self._write_run_pages(project_name=project_name, item=item, previous=prior)
 
         template = self.environment.get_template("project.html.j2")
         html = template.render(
@@ -130,7 +141,6 @@ class StaticSiteBuilder:
 
         latest_link = project_dir / "latest"
         latest_run = Path(latest["scan_dir"])
-        latest_report_target = project_dir / "latest" / "report.html"
         if latest_link.exists() or latest_link.is_symlink():
             if latest_link.is_symlink() or latest_link.is_file():
                 latest_link.unlink()
@@ -148,17 +158,187 @@ class StaticSiteBuilder:
 
             shutil.copytree(latest_run, latest_link)
 
-        runs = list(reversed(runs))
-        report_template = self.environment.get_template("project.html.j2")
-        for run in runs:
-            run_dir = project_dir / "runs" / str(run["scan_id"])
-            run_dir.mkdir(parents=True, exist_ok=True)
-            run_html = report_template.render(
-                project=project_name,
-                latest=latest,
-                runs=[run],
+    def _write_run_pages(self, *, project_name: str, item: dict[str, Any], previous: dict[str, Any] | None) -> None:
+        run_dir = Path(item["scan_dir"])
+        summary = item.get("summary", {})
+        score = item.get("score", {})
+        action_plan = self.store.load_json(run_dir / "action-plan.json") if (run_dir / "action-plan.json").exists() else {}
+        findings = self.store.load_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else []
+        inventory = self.store.load_json(run_dir / "inventory.json") if (run_dir / "inventory.json").exists() else summary.get("inventory", {})
+        previous_score = float((previous or {}).get("score", {}).get("overall_score", 0.0) or 0.0) if previous else None
+        current_score = float(score.get("overall_score", 0.0) or 0.0)
+        delta = round(current_score - previous_score, 2) if previous_score is not None else None
+        generated_at = str(item.get("run_manifest", {}).get("generated_at") or "")
+        generated_local = generated_at
+        if generated_at:
+            try:
+                parsed = generated_at.replace("Z", "+00:00")
+                generated_local = __import__("datetime").datetime.fromisoformat(parsed).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            except ValueError:
+                generated_local = generated_at
+
+        severity_counts = self._severity_counts(findings)
+        most_affected_files = self._most_affected_files(findings)
+        rule_families = self._rule_family_breakdown(findings)
+        finding_clusters = self._finding_clusters(findings)
+        security_groups = self._security_groups(findings)
+        runtime = self._runtime_metadata(summary, inventory)
+        links = {
+            "details": "details.html",
+            "summary": "summary.json",
+            "findings": "findings.json",
+            "action_plan": "action-plan.json",
+            "inventory": "inventory.json",
+            "policy_resolution": "policy-resolution.json",
+            "score": "score.json",
+            "policy": "policy.json",
+            "manifest": "run_manifest.json",
+        }
+
+        report_template = self.environment.get_template("run_report.html.j2")
+        details_template = self.environment.get_template("run_details.html.j2")
+        report_html = report_template.render(
+            project=project_name,
+            generated_at=generated_at,
+            generated_local=generated_local,
+            score=current_score,
+            grade=score.get("grade"),
+            delta=delta,
+            action_plan=action_plan,
+            key_metrics=score.get("scalar_metrics", {}),
+            security_count=len(action_plan.get("security_concerns", [])),
+            architectural_count=len(action_plan.get("architectural_concerns", [])),
+            links=links,
+        )
+        details_html = details_template.render(
+            project=project_name,
+            generated_at=generated_at,
+            generated_local=generated_local,
+            severity_counts=severity_counts,
+            clusters=finding_clusters,
+            security_groups=security_groups,
+            most_affected_files=most_affected_files,
+            rule_families=rule_families,
+            trend={"current_score": current_score, "previous_score": previous_score, "delta": delta},
+            runtime=runtime,
+            links=links,
+        )
+        self._write_html(run_dir / "report.html", report_html)
+        self._write_html(run_dir / "details.html", details_html)
+
+    @staticmethod
+    def _severity_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
+        order = ["critical", "high", "medium", "low", "info"]
+        counts = {k: 0 for k in order}
+        for finding in findings:
+            sev = str(finding.get("severity", "")).lower()
+            if sev in counts:
+                counts[sev] += 1
+        return counts
+
+    @staticmethod
+    def _most_affected_files(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        bucket: dict[str, int] = {}
+        for finding in findings:
+            file_path = str(finding.get("file") or "")
+            if file_path:
+                bucket[file_path] = bucket.get(file_path, 0) + 1
+        rows = [{"file": key, "count": value} for key, value in bucket.items()]
+        rows.sort(key=lambda item: (-int(item["count"]), str(item["file"])))
+        return rows[:10]
+
+    @staticmethod
+    def _rule_family_breakdown(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        bucket: dict[str, int] = {}
+        for finding in findings:
+            rule = str(finding.get("rule_id") or "unknown").strip().lower()
+            token = re.split(r"[.:/_\\-]", rule)[0] if rule else "unknown"
+            bucket[token or "unknown"] = bucket.get(token or "unknown", 0) + 1
+        rows = [{"rule_family": key, "count": value} for key, value in bucket.items()]
+        rows.sort(key=lambda item: (-int(item["count"]), str(item["rule_family"])))
+        return rows[:12]
+
+    @staticmethod
+    def _finding_clusters(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for finding in findings:
+            sev = str(finding.get("severity") or "info").lower()
+            category = str(finding.get("category") or "unknown")
+            message = str(finding.get("normalized_message") or finding.get("message") or "").strip().lower()
+            key = (sev, category, " ".join(message.split(" ")[:2]) if message else "generic")
+            row = groups.setdefault(
+                key,
+                {"severity": sev, "category": category, "message_family": key[2], "count": 0, "example_files": set()},
             )
-            self._write_html(run_dir / "report.html", run_html)
+            row["count"] += 1
+            file_path = str(finding.get("file") or "")
+            if file_path and len(row["example_files"]) < 3:
+                row["example_files"].add(file_path)
+        rows: list[dict[str, Any]] = []
+        for row in groups.values():
+            rows.append(
+                {
+                    "severity": row["severity"],
+                    "category": row["category"],
+                    "message_family": row["message_family"],
+                    "count": row["count"],
+                    "example_files": sorted(row["example_files"]),
+                }
+            )
+        rows.sort(
+            key=lambda item: (
+                severity_rank.get(str(item["severity"]).lower(), 9),
+                -int(item["count"]),
+                str(item["category"]),
+                str(item["message_family"]),
+            )
+        )
+        return rows[:40]
+
+    @staticmethod
+    def _runtime_metadata(summary: dict[str, Any], inventory: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "scanner_count": int(summary.get("scanner_count", 0) or 0),
+            "successful_scanners": int(summary.get("successful_scanners", 0) or 0),
+            "failed_scanners": int(summary.get("failed_scanners", 0) or 0),
+            "parser_summary": summary.get("parser_summary", {}),
+            "inventory": inventory,
+            "project_metadata": summary.get("project_metadata", {}),
+        }
+
+    @staticmethod
+    def _security_groups(findings: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        grouped = {
+            "runtime": [],
+            "tooling": [],
+            "test_only": [],
+            "false_positive": [],
+        }
+        for finding in findings:
+            if str(finding.get("category")) != "security":
+                continue
+            security_class = str(finding.get("security_class") or "unknown")
+            row = {
+                "severity": str(finding.get("severity") or "info"),
+                "rule_id": str(finding.get("rule_id") or ""),
+                "file": str(finding.get("file") or ""),
+                "line": finding.get("line"),
+                "message": str(finding.get("message") or ""),
+                "security_class": security_class,
+                "score_weight": float(finding.get("score_weight", 1.0) or 1.0),
+            }
+            if security_class == "runtime_security":
+                grouped["runtime"].append(row)
+            elif security_class == "tooling_security":
+                grouped["tooling"].append(row)
+            elif security_class == "test_security":
+                grouped["test_only"].append(row)
+            elif security_class == "false_positive":
+                grouped["false_positive"].append(row)
+            else:
+                grouped["runtime"].append(row)
+        return grouped
 
     def _write_html(self, path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

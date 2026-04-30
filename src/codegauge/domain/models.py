@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
-from typing import Iterable, Mapping, Sequence, Any
-
 from enum import Enum
+from pathlib import Path
+from typing import Any, Mapping, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +53,13 @@ class Finding(BaseModel):
     remediation: str | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=1.0)
     tags: Sequence[str] = Field(default_factory=list)
+    security_class: str = "not_security"
+    security_context: str = "non_security"
+    security_impact: str = "none"
+    score_weight: float = Field(ge=0.0, default=1.0)
+    classification_reason: str = "default_unknown"
+    classification_rule_id: str = "default_unknown"
+    classification_detail: str | None = None
     raw_payload: Mapping[str, Any] = Field(default_factory=dict)
 
 

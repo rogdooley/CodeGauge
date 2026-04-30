@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeGauge Details - {{ project }}</title>
+    <style>
+      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+      th, td { border: 1px solid #d1d5db; padding: 0.45rem; text-align: left; }
+      th { background: #f3f4f6; }
+      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .status { margin-bottom: 1rem; color: #4b5563; }
+      .false-positive { border: 1px dashed #9ca3af; padding: 0.75rem; background: #f9fafb; }
+    </style>
+  </head>
+  <body>
+    <h1>Details: {{ project }}</h1>
+    <p class="status mono">{{ generated_local }}{% if generated_at %} ({{ generated_at }}){% endif %}</p>
+
+    <h2>Findings by Severity</h2>
+    <table>
+      <thead><tr><th>Severity</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for severity, count in severity_counts.items() %}
+        <tr><td>{{ severity }}</td><td>{{ count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Most Affected Files</h2>
+    <table>
+      <thead><tr><th>File</th><th>Findings</th></tr></thead>
+      <tbody>
+        {% for row in most_affected_files %}
+        <tr><td class="mono">{{ row.file }}</td><td>{{ row.count }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">No file-level findings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Rule Family Breakdown</h2>
+    <table>
+      <thead><tr><th>Rule Family</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for row in rule_families %}
+        <tr><td class="mono">{{ row.rule_family }}</td><td>{{ row.count }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">No rule families.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Clustered Findings (Severity-First)</h2>
+    <table>
+      <thead><tr><th>Severity</th><th>Category</th><th>Message Family</th><th>Count</th><th>Example Files</th></tr></thead>
+      <tbody>
+        {% for row in clusters %}
+        <tr>
+          <td>{{ row.severity }}</td>
+          <td>{{ row.category }}</td>
+          <td>{{ row.message_family }}</td>
+          <td>{{ row.count }}</td>
+          <td class="mono">{{ row.example_files|join(", ") if row.example_files else "-" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">No clustered findings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Security Findings by Classification</h2>
+
+    <h3>Runtime</h3>
+    <table>
+      <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
+      <tbody>
+        {% for row in security_groups.runtime %}
+        <tr>
+          <td>{{ row.severity }}</td>
+          <td class="mono">{{ row.rule_id }}</td>
+          <td class="mono">{{ row.file }}</td>
+          <td>{{ row.line if row.line is not none else "-" }}</td>
+          <td>{{ row.score_weight }}</td>
+          <td>{{ row.message }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">No runtime security findings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>Tooling</h3>
+    <table>
+      <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
+      <tbody>
+        {% for row in security_groups.tooling %}
+        <tr>
+          <td>{{ row.severity }}</td>
+          <td class="mono">{{ row.rule_id }}</td>
+          <td class="mono">{{ row.file }}</td>
+          <td>{{ row.line if row.line is not none else "-" }}</td>
+          <td>{{ row.score_weight }}</td>
+          <td>{{ row.message }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">No tooling security findings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>Test-only</h3>
+    <table>
+      <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
+      <tbody>
+        {% for row in security_groups.test_only %}
+        <tr>
+          <td>{{ row.severity }}</td>
+          <td class="mono">{{ row.rule_id }}</td>
+          <td class="mono">{{ row.file }}</td>
+          <td>{{ row.line if row.line is not none else "-" }}</td>
+          <td>{{ row.score_weight }}</td>
+          <td>{{ row.message }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">No test-only security findings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="false-positive">
+      <h3>False Positive (Non-actionable)</h3>
+      <table>
+        <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
+        <tbody>
+          {% for row in security_groups.false_positive %}
+          <tr>
+            <td>{{ row.severity }}</td>
+            <td class="mono">{{ row.rule_id }}</td>
+            <td class="mono">{{ row.file }}</td>
+            <td>{{ row.line if row.line is not none else "-" }}</td>
+            <td>{{ row.score_weight }}</td>
+            <td>{{ row.message }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6">No false positives.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Trend vs Previous Run</h2>
+    <table>
+      <tbody>
+        <tr><th>Current Score</th><td>{{ "%.2f"|format(trend.current_score) }}</td></tr>
+        <tr><th>Previous Score</th><td>{% if trend.previous_score is not none %}{{ "%.2f"|format(trend.previous_score) }}{% else %}n/a{% endif %}</td></tr>
+        <tr><th>Delta</th><td>{% if trend.delta is not none %}{{ "%+.2f"|format(trend.delta) }}{% else %}n/a{% endif %}</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Runtime Metadata</h2>
+    <table>
+      <tbody>
+        <tr><th>Scanner Count</th><td>{{ runtime.scanner_count }}</td></tr>
+        <tr><th>Successful Scanners</th><td>{{ runtime.successful_scanners }}</td></tr>
+        <tr><th>Failed Scanners</th><td>{{ runtime.failed_scanners }}</td></tr>
+        <tr><th>Parser Summary</th><td class="mono">{{ runtime.parser_summary }}</td></tr>
+        <tr><th>Inventory</th><td class="mono">{{ runtime.inventory }}</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="raw-artifacts">Raw Artifact Links</h2>
+    <ul>
+      <li><a href="{{ links.summary }}">summary.json</a></li>
+      <li><a href="{{ links.findings }}">findings.json</a></li>
+      <li><a href="{{ links.action_plan }}">action-plan.json</a></li>
+      <li><a href="{{ links.inventory }}">inventory.json</a></li>
+      <li><a href="{{ links.policy_resolution }}">policy-resolution.json</a></li>
+      <li><a href="{{ links.score }}">score.json</a></li>
+      <li><a href="{{ links.policy }}">policy.json</a></li>
+      <li><a href="{{ links.manifest }}">run_manifest.json</a></li>
+    </ul>
+  </body>
+</html>

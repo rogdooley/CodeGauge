@@ -47,7 +47,8 @@ class CodeGaugeScoringEngine:
                 )
                 continue
             current = accumulators[metric.category]
-            penalty = self._SEVERITY_PENALTIES[metric.severity] * metric.count * metric.score_hint
+            count_for_penalty = metric.weighted_count if metric.weighted_count is not None else float(metric.count)
+            penalty = self._SEVERITY_PENALTIES[metric.severity] * count_for_penalty * metric.score_hint
             accumulators[metric.category] = _CategoryAccumulator(
                 finding_count=current.finding_count + metric.count,
                 penalty=current.penalty + penalty,

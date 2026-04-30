@@ -17,6 +17,7 @@ from ..scoring import CodeGaugeScoringEngine
 from ..services.metrics import MetricsExtractor
 from ..services.recommendation_engine import RecommendationEngine, strip_internal_scores
 from ..services.report_normalizer import FINGERPRINT_VERSION, MESSAGE_NORMALIZER_VERSION, finding_sort_key, normalize_finding_record
+from ..services.security_classifier import SecurityFindingClassifier
 from ..storage import ScanArtifactStore
 
 
@@ -76,6 +77,8 @@ def scan_handler(
         project = services.project
         start = perf_counter()
         results = services.orchestrator.run(project)
+        classifier = SecurityFindingClassifier()
+        results = classifier.classify_scan_results(results)
         if not results:
             typer.echo(
                 f"scan execution failed: no scanners resolved for project '{project.name}'. "
@@ -140,6 +143,15 @@ def scan_handler(
                 findings_payload.append(normalized)
                 remaining_payload_bytes = max(0, remaining_payload_bytes - used)
         findings_payload.sort(key=finding_sort_key)
+        security_by_class: dict[str, int] = {key: 0 for key in classifier.SECURITY_CLASSES}
+        security_by_context: dict[str, int] = {key: 0 for key in classifier.SECURITY_CONTEXTS}
+        for finding in findings_payload:
+            if str(finding.get("category")) != "security":
+                continue
+            security_class = str(finding.get("security_class") or "unclassified")
+            security_context = str(finding.get("security_context") or "unclassified")
+            security_by_class[security_class] = security_by_class.get(security_class, 0) + 1
+            security_by_context[security_context] = security_by_context.get(security_context, 0) + 1
         parser_summary_global = {
             "CODEGAUGE.PARSER.MISSING_RULE_ID": 0,
             "CODEGAUGE.PARSER.INVALID_PATH": 0,
@@ -196,6 +208,11 @@ def scan_handler(
                 else None
             ),
         }
+        summary_payload["security_summary"] = {
+            "by_class": dict(sorted(security_by_class.items())),
+            "by_context": dict(sorted(security_by_context.items())),
+        }
+        summary_payload["classifier"] = classifier.provenance()
         report_material = json.dumps(
             {"summary": summary_payload, "findings": findings_payload},
             sort_keys=True,

@@ -80,6 +80,9 @@ def _write_run(
     (run_dir / "policy.json").write_text(json.dumps(policy_payload))
     (run_dir / "run_manifest.json").write_text(json.dumps(manifest))
     (run_dir / "report.html").write_text("<html><body>report</body></html>")
+    (run_dir / "action-plan.json").write_text(json.dumps({"schema_version": "1.0.0", "executive_summary": "x"}))
+    (run_dir / "inventory.json").write_text(json.dumps({}))
+    (run_dir / "policy-resolution.json").write_text(json.dumps({}))
 
 
 def test_build_site_generates_portal_and_project_indexes(tmp_path: Path) -> None:
@@ -117,8 +120,10 @@ def test_build_site_generates_portal_and_project_indexes(tmp_path: Path) -> None
     assert "Project: alpha" in alpha
     assert "Runs" in alpha
     assert "report.html" in alpha
+    assert "details.html" in alpha
     assert "summary.json" in alpha
     assert "findings.json" in alpha
+    assert "action-plan.json" in alpha
     assert "Project: beta" in beta
     assert (report_root / "projects" / "alpha" / "latest").exists()
 
@@ -154,4 +159,16 @@ def test_scan_generates_portal_tree_with_runs_and_latest(tmp_path: Path) -> None
     assert (run_dir / "findings.json").exists()
     assert (run_dir / "run_manifest.json").exists()
     assert (run_dir / "report.html").exists()
+    assert (run_dir / "details.html").exists()
+    assert (run_dir / "action-plan.json").exists()
+    assert (run_dir / "inventory.json").exists()
+    assert (run_dir / "policy-resolution.json").exists()
     assert (project_dir / "latest").exists()
+
+    run_report = (run_dir / "report.html").read_text()
+    assert "href=\"details.html\"" in run_report
+    run_details = (run_dir / "details.html").read_text()
+    assert "href=\"summary.json\"" in run_details
+    assert "href=\"findings.json\"" in run_details
+    assert "href=\"action-plan.json\"" in run_details
+    assert "Security Findings by Classification" in run_details
