@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import subprocess
+import shutil
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +22,7 @@ from .bootstrap.factory import (
     register_builtin_scanners,
 )
 from .config import ConfigLoadError
-from .domain.models import ScanSummary, ScanResultSummary
+from .domain.models import Language, ScanSummary, ScanResultSummary
 from .policy import CodeGaugePolicyEngine, PolicyStatus
 from .reporting import StaticSiteBuilder
 from .scoring import CodeGaugeScoringEngine
@@ -49,6 +51,8 @@ baseline_app = typer.Typer()
 app.add_typer(baseline_app, name="baseline")
 cache_app = typer.Typer()
 app.add_typer(cache_app, name="cache")
+secrets_app = typer.Typer()
+app.add_typer(secrets_app, name="secrets")
 
 _PARSE_FAILURE_CODES = {
     ParserErrorCode.parse_error,
@@ -269,6 +273,56 @@ def _to_scan_summary(
     )
 
 
+def _git_history_scan_gate(project_path: Path, *, commit_limit: int, size_limit_mb: int) -> dict[str, object]:
+    try:
+        commit_run = subprocess.run(
+            ["git", "-C", str(project_path), "rev-list", "--count", "--all"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        commit_count = int((commit_run.stdout or "0").strip() or "0") if commit_run.returncode == 0 else 0
+    except Exception:
+        commit_count = 0
+
+    size_bytes = 0
+    try:
+        for path in project_path.rglob("*"):
+            if path.is_file():
+                size_bytes += path.stat().st_size
+    except Exception:
+        size_bytes = 0
+    size_mb = int(size_bytes / (1024 * 1024))
+
+    if commit_count > commit_limit:
+        return {
+            "allowed": False,
+            "reason": "commit_limit_exceeded",
+            "commit_count": commit_count,
+            "commit_limit": commit_limit,
+            "repo_size_mb": size_mb,
+            "size_limit_mb": size_limit_mb,
+        }
+    if size_mb > size_limit_mb:
+        return {
+            "allowed": False,
+            "reason": "size_limit_exceeded",
+            "commit_count": commit_count,
+            "commit_limit": commit_limit,
+            "repo_size_mb": size_mb,
+            "size_limit_mb": size_limit_mb,
+        }
+    return {
+        "allowed": True,
+        "reason": "within_limits",
+        "commit_count": commit_count,
+        "commit_limit": commit_limit,
+        "repo_size_mb": size_mb,
+        "size_limit_mb": size_limit_mb,
+    }
+
+
 @app.command()
 def scan(
     path: Path,
@@ -290,7 +344,7 @@ def scan(
         "--capture-full-raw",
         help="Capture full unredacted raw payload (requires payload.capture_full_raw=true in config).",
     ),
-) -> None:
+    ) -> None:
     scan_handler(
         path=path,
         json_output=json_output,
@@ -308,6 +362,148 @@ def scan(
         render_scan_human_summary=render_scan_human_summary,
         load_config_fn=load_resolved_config_with_overrides,
         build_services_fn=build_scan_services_with_config,
+        open_browser_fn=open_in_browser,
+    )
+
+
+def _build_secrets_services(path: Path, config, *, include_history: bool, force_history: bool, include_fixtures: bool):
+    if not config.secrets.enabled:
+        secret_scanners = []
+    else:
+        secret_scanners = ["gitleaks", "trufflehog", "secrets_heuristic"]
+    history_gate = {
+        "requested": include_history,
+        "enabled": False,
+        "skipped": False,
+        "reason": "not_requested",
+        "history_scan_status": "never_scanned",
+        "history_last_scanned": None,
+        "history_scan_age_days": None,
+        "history_scan_stale": False,
+    }
+    if include_history:
+        gate = _git_history_scan_gate(
+            path,
+            commit_limit=config.secrets.history_commit_limit,
+            size_limit_mb=config.secrets.history_size_limit_mb,
+        )
+        if force_history or config.secrets.history_scan_enabled or bool(gate.get("allowed")):
+            secret_scanners.append("git_history_secrets")
+            history_gate = {
+                "requested": True,
+                "enabled": True,
+                "skipped": False,
+                "reason": "forced" if force_history else "enabled",
+                "history_scan_status": "fresh",
+                "history_last_scanned": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "history_scan_age_days": 0,
+                "history_scan_stale": False,
+                **gate,
+            }
+        else:
+            history_gate = {
+                "requested": True,
+                "enabled": False,
+                "skipped": True,
+                "reason": str(gate.get("reason") or "threshold_exceeded"),
+                "history_scan_status": "stale",
+                "history_last_scanned": None,
+                "history_scan_age_days": None,
+                "history_scan_stale": True,
+                **gate,
+            }
+    fixture_default = bool(config.secrets.exclude_fixtures)
+    effective_exclude_fixtures = fixture_default and not include_fixtures
+    fixture_excludes = ["tests/fixtures/**", "fixtures/**", "docs/examples/**"] if effective_exclude_fixtures else []
+    unavailable_scanners: list[dict[str, str]] = []
+    for scanner_name, install_hint in (("gitleaks", "brew install gitleaks"), ("trufflehog", "brew install trufflehog")):
+        if scanner_name in secret_scanners and shutil.which(scanner_name) is None:
+            unavailable_scanners.append({"scanner": scanner_name, "install_hint": install_hint})
+
+    unavailable_names = {row["scanner"] for row in unavailable_scanners}
+    updated = config.model_copy(
+        update={
+            "enabled_scanners": [name for name in secret_scanners if name not in unavailable_names],
+            "exclude": list(config.exclude) + fixture_excludes,
+            "disabled_scanners": [
+                name
+                for name in config.disabled_scanners
+                if name not in {"gitleaks", "trufflehog", "secrets_heuristic", "git_history_secrets"}
+            ] + sorted(unavailable_names),
+        }
+    )
+    services = build_scan_services_with_config(path, updated)
+    metadata = dict(services.project.metadata) if isinstance(services.project.metadata, dict) else {}
+    scope_metadata = metadata.get("scan_scope", {}) if isinstance(metadata.get("scan_scope"), dict) else {}
+    language_hints = list(services.project.language_hints)
+    if Language.general not in language_hints:
+        language_hints.append(Language.general)
+    project = services.project.model_copy(
+        update={
+            "language_hints": language_hints,
+            "metadata": {
+                **metadata,
+                "history_scan_gate": history_gate,
+                "secrets_fixture_excludes": fixture_excludes,
+                "secret_scanner_unavailable": unavailable_scanners,
+                "ignored_sensitive_present": int(scope_metadata.get("ignored_sensitive_present", 0) or 0),
+                "ignored_sensitive_patterns": int(scope_metadata.get("ignored_sensitive_patterns", 0) or 0),
+            }
+        },
+        deep=True,
+    )
+    return services.__class__(
+        project_path=services.project_path,
+        project=project,
+        config=services.config,
+        scanner_registry=services.scanner_registry,
+        parser_registry=services.parser_registry,
+        orchestrator=services.orchestrator,
+    )
+
+
+@secrets_app.command("scan")
+def secrets_scan(
+    path: Path,
+    history: bool = typer.Option(False, "--history"),
+    force_history: bool = typer.Option(False, "--force-history"),
+    include_fixtures: bool = typer.Option(False, "--include-fixtures"),
+    json_output: bool = typer.Option(False, "--json"),
+    report_root: Path | None = typer.Option(None, "--report-root"),
+    state_root: Path | None = typer.Option(None, "--state-root"),
+    fail_on_secret: bool | None = typer.Option(None, "--fail-on-secret/--no-fail-on-secret"),
+) -> None:
+    resolved_path = path.expanduser().resolve()
+    resolved_config = load_resolved_config_with_overrides(
+        resolved_path,
+        report_root=report_root,
+        state_root=state_root,
+        open_report=None,
+    )
+    effective_fail_on_secret = bool(resolved_config.secrets.fail_on_secret if fail_on_secret is None else fail_on_secret)
+    scan_handler(
+        path=path,
+        json_output=json_output,
+        verbose=False,
+        report_root=report_root,
+        state_root=state_root,
+        open_report=None,
+        fail_on_policy=effective_fail_on_secret,
+        capture_full_raw=False,
+        collect_scalar_metrics=_collect_scalar_metrics,
+        collect_java_cache_summary=_collect_java_cache_summary,
+        to_scan_summary=_to_scan_summary,
+        compact_scanner_raw_output=_compact_scanner_raw_output,
+        summary_exit_code=_summary_exit_code,
+        render_scan_human_summary=render_scan_human_summary,
+        load_config_fn=load_resolved_config_with_overrides,
+        build_services_fn=lambda p, c: _build_secrets_services(
+            p,
+            c,
+            include_history=history,
+            force_history=force_history,
+            include_fixtures=include_fixtures,
+        ),
         open_browser_fn=open_in_browser,
     )
 

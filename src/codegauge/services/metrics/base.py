@@ -61,7 +61,14 @@ class FindingMetricProvider(MetricProvider):
     def _score_hint(source: str, category: ScoreCategory) -> float:
         if source == "bandit":
             return 1.5
-        if source in {"dependency_check", "spotbugs", "npm_audit", "django_check_deploy"}:
+        if source in {
+            "dependency_check",
+            "spotbugs",
+            "npm_audit",
+            "django_check_deploy",
+            "composer_audit",
+            "govulncheck",
+        }:
             return 1.4
         if source == "coverage":
             return 1.0

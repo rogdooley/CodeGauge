@@ -93,10 +93,12 @@ class Scanner(ABC):
             )
         except subprocess.TimeoutExpired as exc:
             duration = (perf_counter() - start) * 1000
+            stdout = (exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout) or ""
+            stderr = (exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr) or ""
             return ScannerCommandResult(
                 command=command,
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=stdout,
+                stderr=stderr,
                 success=False,
                 duration_ms=duration,
                 error_code=ScannerErrorCode.timeout,

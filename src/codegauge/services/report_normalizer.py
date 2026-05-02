@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 from uuid import UUID
 
 from ..domain.models import Finding
@@ -70,7 +70,10 @@ def _redact(obj: Any, *, redact: bool) -> Any:
         for key, value in obj.items():
             key_s = str(key)
             if _SENSITIVE_KEY_RE.search(key_s):
-                redacted[key_s] = "<redacted>"
+                if isinstance(value, str):
+                    redacted[key_s] = f"<redacted_sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}>"
+                else:
+                    redacted[key_s] = "<redacted>"
             else:
                 redacted[key_s] = _redact(value, redact=redact)
         return redacted
@@ -81,7 +84,7 @@ def _redact(obj: Any, *, redact: bool) -> Any:
         if _safe_uuid(value):
             return "<uuid>"
         if _looks_high_entropy(value):
-            return "<redacted_entropy>"
+            return f"<redacted_entropy_sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}>"
         return value
     return obj
 
@@ -97,7 +100,7 @@ def sanitize_raw_payload(
     encoded = json.dumps(redacted_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
     used = min(len(encoded), max_bytes_per_finding, max(remaining_global_bytes, 0))
     allowed = min(max_bytes_per_finding, max(remaining_global_bytes, 0))
-    truncated = len(encoded) > allowed
+    is_truncated = len(encoded) > allowed
     if allowed <= 0:
         return {}, True, redact, 0
     if len(encoded) <= allowed:
@@ -109,7 +112,7 @@ def sanitize_raw_payload(
             return compact, True, redact, used
     except Exception:
         pass
-    return {"truncated": True}, True, redact, used
+    return {"truncated": is_truncated}, True, redact, used
 
 
 def _snippet_hash(finding: Finding) -> str | None:

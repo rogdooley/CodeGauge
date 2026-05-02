@@ -31,6 +31,18 @@ class StubCoverageScanner(CoverageScanner):
         return self.build_command(project_path)
 
 
+class MissingCoverageDataScanner(CoverageScanner):
+    def is_available(self) -> bool:
+        return True
+
+    def build_command(self, project_path: Path) -> list[str]:
+        _ = project_path
+        return ["coverage", "json", "-o", "-"]
+
+    def execute(self, project_path: Path, files=None):
+        return super().execute(project_path, files=files)
+
+
 def test_coverage_metric_flows_to_scoring_inputs(tmp_path: Path) -> None:
     project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])
     scanner_registry = ScannerRegistry([StubCoverageScanner()])
@@ -50,3 +62,24 @@ def test_coverage_metric_flows_to_scoring_inputs(tmp_path: Path) -> None:
     card = CodeGaugeScoringEngine().score(metrics)
     coverage_score = next(score for score in card.category_scores if score.category == ScoreCategory.coverage)
     assert coverage_score.score == 77.7
+
+
+def test_coverage_no_data_is_treated_as_zero_not_failure(tmp_path: Path, monkeypatch) -> None:
+    project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])
+
+    class _Done:
+        returncode = 2
+        stdout = ""
+        stderr = "No data to report."
+
+    monkeypatch.setattr("codegauge.scanners.coverage_scanner.subprocess.run", lambda *a, **k: _Done())
+
+    scanner_registry = ScannerRegistry([MissingCoverageDataScanner()])
+    parser_registry = ParserRegistry([CoverageParser()])
+    orchestrator = ScanOrchestrator(scanner_registry, parser_registry)
+    results = orchestrator.run(project)
+
+    assert len(results) == 1
+    assert results[0].success is True
+    assert results[0].metadata.get("coverage_missing_data") is True
+    assert results[0].metadata.get("scalar_metrics", {}).get("coverage_percent") == 0.0

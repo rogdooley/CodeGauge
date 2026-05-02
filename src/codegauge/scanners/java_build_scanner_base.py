@@ -52,7 +52,8 @@ class JavaBuildArtifactScanner(Scanner):
         )
         return plan.command
 
-    def execute(self, project_path: Path) -> ScannerCommandResult:
+    def execute(self, project_path: Path, files: Sequence[Path] | None = None) -> ScannerCommandResult:
+        _ = files
         runner = select_build_runner(project_path)
         if runner is None:
             return ScannerCommandResult(
@@ -96,7 +97,7 @@ class JavaBuildArtifactScanner(Scanner):
         cache_hits = 0
         cache_misses = 0
         collected_artifact_contents: list[str] = []
-        module_updates: list[dict[str, str]] = []
+        module_updates: list[dict[str, object]] = []
         last_cache_update: str | None = None
         miss_reason_counts: dict[str, int] = {}
 
@@ -150,10 +151,12 @@ class JavaBuildArtifactScanner(Scanner):
                 )
             except subprocess.TimeoutExpired as exc:
                 duration = (perf_counter() - start) * 1000
+                stdout = (exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout) or ""
+                stderr = (exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr) or ""
                 return ScannerCommandResult(
                     command=module_plan.command,
-                    stdout=exc.stdout or "",
-                    stderr=exc.stderr or "",
+                    stdout=stdout,
+                    stderr=stderr,
                     success=False,
                     duration_ms=duration,
                     error_code="scanner_timeout",

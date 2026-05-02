@@ -56,7 +56,7 @@ def _services(project_path: Path):
 def test_baseline_init_dry_run_shows_count_and_samples(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "proj"
     project.mkdir()
-    monkeypatch.setattr("codegauge.cli.build_scan_services", lambda _p: _services(project))
+    monkeypatch.setattr("codegauge.cli.build_scan_services_with_config", lambda _p, _c: _services(project))
 
     result = runner.invoke(
         app,
@@ -72,7 +72,7 @@ def test_baseline_init_dry_run_shows_count_and_samples(tmp_path: Path, monkeypat
 def test_baseline_init_refuses_overwrite_without_force(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "proj2"
     project.mkdir()
-    monkeypatch.setattr("codegauge.cli.build_scan_services", lambda _p: _services(project))
+    monkeypatch.setattr("codegauge.cli.build_scan_services_with_config", lambda _p, _c: _services(project))
 
     first = runner.invoke(app, ["baseline", "init", str(project), "--owner", "team-a"])
     assert first.exit_code == 0
@@ -87,7 +87,7 @@ def test_baseline_init_refuses_overwrite_without_force(tmp_path: Path, monkeypat
 def test_baseline_init_force_overwrites_and_sets_expiration(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "proj3"
     project.mkdir()
-    monkeypatch.setattr("codegauge.cli.build_scan_services", lambda _p: _services(project))
+    monkeypatch.setattr("codegauge.cli.build_scan_services_with_config", lambda _p, _c: _services(project))
 
     first = runner.invoke(app, ["baseline", "init", str(project), "--owner", "team-a"])
     assert first.exit_code == 0
@@ -102,4 +102,3 @@ def test_baseline_init_force_overwrites_and_sets_expiration(tmp_path: Path, monk
     entry = payload["entries"][0]
     assert entry["owner"] == "team-b"
     assert entry["expires_at"] is not None
-

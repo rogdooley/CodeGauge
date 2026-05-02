@@ -39,6 +39,7 @@ class ScanArtifactStore:
         findings: Sequence[Mapping[str, Any]],
         score: Mapping[str, Any],
         policy: Mapping[str, Any],
+        action_plan: Mapping[str, Any],
         scanner_raw_outputs: Mapping[str, Mapping[str, Any]],
     ) -> PersistedScanPaths:
         timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
@@ -53,6 +54,9 @@ class ScanArtifactStore:
         self._atomic_write_json(run_dir / "findings.json", list(findings))
         self._atomic_write_json(run_dir / "score.json", score)
         self._atomic_write_json(run_dir / "policy.json", policy)
+        self._atomic_write_json(run_dir / "action-plan.json", action_plan)
+        self._atomic_write_json(run_dir / "inventory.json", dict(summary.get("inventory", {}) or {}))
+        self._atomic_write_json(run_dir / "policy-resolution.json", dict(summary.get("policy_resolution", {}) or {}))
 
         raw_dir = run_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)

@@ -24,6 +24,13 @@ class CodeGaugePolicyEngine:
         PolicyReason.critical_security_finding,
         PolicyReason.high_security_findings,
         PolicyReason.low_score,
+        PolicyReason.real_secret_exposure,
+        PolicyReason.probable_secret_exposure,
+        PolicyReason.private_key_material,
+        PolicyReason.baseline_real_secret_prohibited,
+        PolicyReason.history_scan_skipped,
+        PolicyReason.history_scan_stale,
+        PolicyReason.secret_scanner_unavailable,
     )
 
     def evaluate(
@@ -38,6 +45,14 @@ class CodeGaugePolicyEngine:
         baseline_expired_entries: int = 0,
         baseline_missing_owner_entries: int = 0,
         baseline_expiring_soon_entries: int = 0,
+        real_secret_findings: int = 0,
+        probable_secret_findings: int = 0,
+        private_key_findings: int = 0,
+        baseline_real_secret_entries: int = 0,
+        history_scan_skipped: bool = False,
+        history_scan_stale: bool = False,
+        history_scan_age_days: int | None = None,
+        secret_scanner_unavailable_count: int = 0,
     ) -> QualityPolicyResult:
         reason_set: set[PolicyReason] = set()
         violations: list[str] = []
@@ -72,6 +87,18 @@ class CodeGaugePolicyEngine:
         if score_card.overall_score < self.FAIL_SCORE_THRESHOLD:
             reason_set.add(PolicyReason.low_score)
             violations.append("overall score below 60")
+        if real_secret_findings > 0:
+            reason_set.add(PolicyReason.real_secret_exposure)
+            violations.append(f"real credential/secret exposure findings present ({real_secret_findings})")
+        if probable_secret_findings > 0:
+            reason_set.add(PolicyReason.probable_secret_exposure)
+            warnings.append(f"probable secret exposure findings present ({probable_secret_findings})")
+        if private_key_findings > 0:
+            reason_set.add(PolicyReason.private_key_material)
+            violations.append(f"private key material findings present ({private_key_findings})")
+        if baseline_real_secret_entries > 0:
+            reason_set.add(PolicyReason.baseline_real_secret_prohibited)
+            violations.append(f"baseline contains prohibited real-secret entries ({baseline_real_secret_entries})")
         if baseline_expired_entries > 0:
             reason_set.add(PolicyReason.baseline_entry_expired)
             warnings.append(f"baseline has expired entries ({baseline_expired_entries})")
@@ -81,6 +108,27 @@ class CodeGaugePolicyEngine:
         if baseline_expiring_soon_entries > 0:
             reason_set.add(PolicyReason.baseline_entry_expiring)
             warnings.append(f"baseline has entries expiring soon ({baseline_expiring_soon_entries})")
+        if history_scan_skipped:
+            reason_set.add(PolicyReason.history_scan_skipped)
+            warnings.append("history scan skipped; historical secret exposure coverage is incomplete")
+        if history_scan_stale:
+            reason_set.add(PolicyReason.history_scan_stale)
+            age = int(history_scan_age_days) if isinstance(history_scan_age_days, int) else None
+            if age is None:
+                warnings.append("history scan stale; historical secret exposure coverage is outdated")
+            elif age >= 365:
+                warnings.append(f"history scan stale ({age} days); critical refresh overdue")
+            elif age >= 180:
+                warnings.append(f"history scan stale ({age} days); refresh strongly recommended")
+            elif age >= 90:
+                warnings.append(f"history scan stale ({age} days); refresh recommended")
+            elif age >= 60:
+                warnings.append(f"history scan aging ({age} days)")
+            else:
+                warnings.append(f"history scan stale ({age} days)")
+        if secret_scanner_unavailable_count > 0:
+            reason_set.add(PolicyReason.secret_scanner_unavailable)
+            warnings.append(f"secret scanners unavailable ({secret_scanner_unavailable_count})")
 
         if high_security_findings > self.HIGH_SECURITY_FINDINGS_WARN_THRESHOLD:
             reason_set.add(PolicyReason.high_security_findings)

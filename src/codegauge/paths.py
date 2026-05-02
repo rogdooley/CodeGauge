@@ -18,8 +18,8 @@ def default_state_root() -> Path:
         return home / "AppData" / "Local" / "CodeGauge"
     xdg_data_home = os.environ.get("XDG_DATA_HOME")
     if xdg_data_home:
-        return Path(xdg_data_home) / "codegauge"
-    return home / ".local" / "share" / "codegauge"
+        return Path(xdg_data_home) / "CodeGauge"
+    return home / ".local" / "share" / "CodeGauge"
 
 
 def default_report_root() -> Path:
@@ -65,5 +65,5 @@ def java_cache_root_for_project(state_root: Path, project_root: Path) -> Path:
     import hashlib
 
     resolved_project = project_root.expanduser().resolve()
-    key = hashlib.sha1(str(resolved_project).encode("utf-8")).hexdigest()[:12]
+    key = hashlib.sha256(str(resolved_project).encode("utf-8")).hexdigest()[:12]
     return state_root / "cache" / "java" / f"{resolved_project.name}-{key}" / "modules"

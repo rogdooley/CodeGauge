@@ -9,6 +9,15 @@ DEFAULT_SCANNER_NAMES: frozenset[str] = frozenset(
     {
         "ruff",
         "pyright",
+        "phpstan",
+        "composer_audit",
+        "phpcs",
+        "opengrep_php",
+        "go_vet",
+        "staticcheck",
+        "govulncheck",
+        "go_coverage",
+        "opengrep_go",
         "coverage",
         "radon",
         "vulture",
@@ -37,6 +46,10 @@ DEFAULT_SCANNER_NAMES: frozenset[str] = frozenset(
         "npm_audit",
         "js_coverage",
         "opengrep_js",
+        "gitleaks",
+        "trufflehog",
+        "secrets_heuristic",
+        "git_history_secrets",
     }
 )
 
@@ -87,6 +100,19 @@ class PayloadConfig(BaseModel):
     max_bytes_global: int = Field(default=10 * 1024 * 1024, ge=1024)
 
 
+class SecretsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    history_scan_enabled: bool = False
+    history_commit_limit: int = Field(default=5000, ge=1)
+    history_size_limit_mb: int = Field(default=1000, ge=1)
+    exclude_fixtures: bool = True
+    fail_on_secret: bool = False
+    ignored_sensitive_patterns_add: list[str] = Field(default_factory=list)
+    ignored_sensitive_patterns_remove: list[str] = Field(default_factory=list)
+
+
 class CodeGaugeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -102,6 +128,7 @@ class CodeGaugeConfig(BaseModel):
     scanners: dict[str, ScannerSettings] = Field(default_factory=dict)
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig)
     payload: PayloadConfig = Field(default_factory=PayloadConfig)
+    secrets: SecretsConfig = Field(default_factory=SecretsConfig)
 
     @field_validator("enabled_scanners", "disabled_scanners", mode="after")
     @classmethod

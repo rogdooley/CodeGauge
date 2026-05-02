@@ -53,10 +53,21 @@ class RadonParser(ScannerParser):
         for value in mi_root.values():
             if isinstance(value, (int, float)):
                 maintainability_values.append(float(value))
-            elif isinstance(value, list):
+                continue
+            if isinstance(value, dict):
+                mi_value = value.get("mi")
+                if isinstance(mi_value, (int, float)):
+                    maintainability_values.append(float(mi_value))
+                continue
+            if isinstance(value, list):
                 for inner in value:
                     if isinstance(inner, (int, float)):
                         maintainability_values.append(float(inner))
+                        continue
+                    if isinstance(inner, dict):
+                        mi_value = inner.get("mi")
+                        if isinstance(mi_value, (int, float)):
+                            maintainability_values.append(float(mi_value))
 
         average_complexity = round(sum(complexities) / len(complexities), 2) if complexities else None
         worst_complexity = max(complexities) if complexities else None

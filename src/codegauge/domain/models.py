@@ -29,6 +29,7 @@ class Category(str, Enum):
 
 class Language(str, Enum):
     python = "python"
+    php = "php"
     javascript = "javascript"
     typescript = "typescript"
     java = "java"

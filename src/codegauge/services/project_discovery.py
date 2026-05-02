@@ -21,6 +21,31 @@ class ProjectDiscoveryService:
         if self.detectors.java.is_java_project(path):
             language_hints.append(Language.java)
             metadata["java"] = self.detectors.java.detect(path)
+        if self.detectors.php.is_php_project(path):
+            language_hints.append(Language.php)
+            php_meta = self.detectors.php.detect(path)
+            if isinstance(php_meta, dict):
+                metadata["php"] = php_meta
+        if self.detectors.go.is_go_project(path):
+            language_hints.append(Language.go)
+            go_meta = self.detectors.go.detect(path)
+            if isinstance(go_meta, dict):
+                metadata["go"] = go_meta
+
+        if Language.python in language_hints:
+            metadata.setdefault("language", "python")
+        elif Language.java in language_hints:
+            metadata.setdefault("language", "java")
+        elif Language.php in language_hints:
+            metadata.setdefault("language", "php")
+        elif Language.go in language_hints:
+            metadata.setdefault("language", "go")
+        elif Language.typescript in language_hints:
+            metadata.setdefault("language", "typescript")
+        elif Language.javascript in language_hints:
+            metadata.setdefault("language", "javascript")
+        elif Language.general in language_hints:
+            metadata.setdefault("language", "general")
 
         metadata.update(self.detectors.python.detect(path))
 

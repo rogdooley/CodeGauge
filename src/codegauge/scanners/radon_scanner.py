@@ -5,6 +5,7 @@ import subprocess
 from time import perf_counter
 import shutil
 from pathlib import Path
+from typing import Sequence
 
 from .base import Scanner, ScannerCommandResult
 
@@ -19,9 +20,32 @@ class RadonScanner(Scanner):
     def build_command(self, project_path: Path) -> list[str]:
         return ["radon", "cc", "-j", str(project_path), *self.extra_args]
 
-    def execute(self, project_path: Path) -> ScannerCommandResult:
-        cc_command = ["radon", "cc", "-j", str(project_path), *self.extra_args]
-        mi_command = ["radon", "mi", "-j", str(project_path), *self.extra_args]
+    def supports_explicit_file_list(self) -> bool:
+        return True
+
+    def build_command_for_files(self, project_path: Path, files: Sequence[Path]) -> list[str]:
+        _ = project_path
+        paths = [str(path) for path in files]
+        return ["radon", "cc", "-j", *paths, *self.extra_args]
+
+    def execute(self, project_path: Path, files: Sequence[Path] | None = None) -> ScannerCommandResult:
+        if files is not None and not self.supports_explicit_file_list():
+            return ScannerCommandResult(
+                command=[],
+                stdout="",
+                stderr="",
+                success=False,
+                duration_ms=0.0,
+                error_code="scanner_contract_violation",
+                error=f"scanner does not support explicit file-list execution: {self.scanner_name}",
+            )
+
+        if files is not None:
+            cc_command = ["radon", "cc", "-j", *[str(path) for path in files], *self.extra_args]
+            mi_command = ["radon", "mi", "-j", *[str(path) for path in files], *self.extra_args]
+        else:
+            cc_command = ["radon", "cc", "-j", str(project_path), *self.extra_args]
+            mi_command = ["radon", "mi", "-j", str(project_path), *self.extra_args]
         start = perf_counter()
         try:
             cc = subprocess.run(
@@ -80,10 +104,12 @@ class RadonScanner(Scanner):
             )
         except subprocess.TimeoutExpired as exc:
             duration = (perf_counter() - start) * 1000
+            stdout = (exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout) or ""
+            stderr = (exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr) or ""
             return ScannerCommandResult(
                 command=cc_command,
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=stdout,
+                stderr=stderr,
                 success=False,
                 duration_ms=duration,
                 error_code="scanner_timeout",

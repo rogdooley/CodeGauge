@@ -15,6 +15,17 @@ def test_config_loads_defaults_for_project(tmp_path: Path) -> None:
     assert config.open_report is False
     assert config.payload.capture_full_raw is False
     assert config.payload.redact is True
+    assert config.secrets.history_scan_enabled is False
+    assert config.secrets.history_commit_limit == 5000
+    assert config.secrets.history_size_limit_mb == 1000
+    assert config.secrets.enabled is True
+    assert config.secrets.exclude_fixtures is True
+    assert config.secrets.fail_on_secret is False
+
+
+def test_default_bandit_config_excludes_tests(tmp_path: Path) -> None:
+    config = load_config(project_path=tmp_path)
+    assert config.scanners["bandit"].extra_args == ["-x", "tests"]
 
 
 def test_malformed_toml_fails_with_clear_error(tmp_path: Path) -> None:
@@ -50,7 +61,7 @@ def test_enabled_disabled_conflict_fails_closed(tmp_path: Path) -> None:
 
 def test_project_config_overrides_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_home = tmp_path / "home"
-    global_cfg = fake_home / ".config" / "codegauge" / "config.toml"
+    global_cfg = fake_home / ".config" / "CodeGauge" / "config.toml"
     global_cfg.parent.mkdir(parents=True)
     global_cfg.write_text(
         "\n".join(

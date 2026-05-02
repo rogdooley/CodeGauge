@@ -40,6 +40,7 @@ def test_persist_scan_artifacts_portal_layout_and_latest_pointer(tmp_path: Path)
         findings=findings,
         score=score,
         policy=policy,
+        action_plan={"schema_version": "1.0.0", "executive_summary": "ok"},
         scanner_raw_outputs=raw,
     )
 
@@ -49,6 +50,9 @@ def test_persist_scan_artifacts_portal_layout_and_latest_pointer(tmp_path: Path)
     assert (persisted.run_dir / "score.json").exists()
     assert (persisted.run_dir / "policy.json").exists()
     assert (persisted.run_dir / "run_manifest.json").exists()
+    assert (persisted.run_dir / "action-plan.json").exists()
+    assert (persisted.run_dir / "inventory.json").exists()
+    assert (persisted.run_dir / "policy-resolution.json").exists()
     assert (persisted.run_dir / "raw" / "ruff.json").exists()
 
     manifest = json.loads((persisted.run_dir / "run_manifest.json").read_text())
@@ -74,6 +78,7 @@ def test_list_and_prune_run_dirs(tmp_path: Path) -> None:
         findings=findings,
         score=score,
         policy=policy,
+        action_plan={"schema_version": "1.0.0", "executive_summary": "ok"},
         scanner_raw_outputs=raw,
     )
     store.persist_scan_artifacts(
@@ -82,6 +87,7 @@ def test_list_and_prune_run_dirs(tmp_path: Path) -> None:
         findings=findings,
         score=score,
         policy=policy,
+        action_plan={"schema_version": "1.0.0", "executive_summary": "ok"},
         scanner_raw_outputs=raw,
     )
 
@@ -102,6 +108,7 @@ def test_prune_runs_older_than(tmp_path: Path) -> None:
         findings=findings,
         score=score,
         policy=policy,
+        action_plan={"schema_version": "1.0.0", "executive_summary": "ok"},
         scanner_raw_outputs=raw,
     )
     new_run = store.persist_scan_artifacts(
@@ -110,6 +117,7 @@ def test_prune_runs_older_than(tmp_path: Path) -> None:
         findings=findings,
         score=score,
         policy=policy,
+        action_plan={"schema_version": "1.0.0", "executive_summary": "ok"},
         scanner_raw_outputs=raw,
     )
 

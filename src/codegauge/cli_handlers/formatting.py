@@ -35,6 +35,9 @@ def render_scan_human_summary(*, project_name: str, results, summary, report_roo
         if isinstance(reason_counts, dict) and reason_counts:
             compact = " ".join(f"{reason}={count}" for reason, count in sorted(reason_counts.items()))
             typer.echo(f"Miss reasons: {compact}")
+    suppression_rate = score_card.get("scalar_metrics", {}).get("secrets_suppression_rate_percent") if isinstance(score_card, dict) else None
+    if isinstance(suppression_rate, (int, float)):
+        typer.echo(f"Secret scanner noise suppression: {float(suppression_rate):.2f}%")
     if str(policy_payload.get("status")) in {"warn", "fail"}:
         raw_reasons = policy_payload.get("reasons")
         reasons = raw_reasons if isinstance(raw_reasons, list) else []

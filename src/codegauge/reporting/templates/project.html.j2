@@ -57,8 +57,12 @@
           <td class="mono">{{ run.reason_codes|join(", ") if run.reason_codes else "-" }}</td>
           <td>
             <a href="{{ run.report_link }}">report.html</a>
+            <a href="{{ run.details_link }}">details.html</a>
             <a href="{{ run.summary_link }}">summary.json</a>
             <a href="{{ run.findings_link }}">findings.json</a>
+            <a href="{{ run.action_plan_json_link }}">action-plan.json</a>
+            <a href="{{ run.inventory_link }}">inventory.json</a>
+            <a href="{{ run.policy_resolution_link }}">policy-resolution.json</a>
           </td>
         </tr>
         {% endfor %}

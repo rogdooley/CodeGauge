@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeGauge Action Plan - {{ project }}</title>
+    <style>
+      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
+      h1, h2 { margin-bottom: 0.5rem; }
+      .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; }
+      .meta { color: #4b5563; font-size: 0.92rem; }
+      .row { margin: 0.2rem 0; }
+      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>Action Plan: {{ project }}</h1>
+
+    <h2>Executive Summary</h2>
+    <p>{{ action_plan.executive_summary }}</p>
+
+    {% macro rec_card(item) -%}
+      <div class="card">
+        <div><strong>{{ item.title }}</strong></div>
+        <div class="meta">Priority: {{ item.priority }} | Category: {{ item.category }} | Effort: {{ item.effort }} | Impact: {{ item.impact }}</div>
+        <div class="row"><strong>Why:</strong> {{ item.why }}</div>
+        <div class="row"><strong>Where:</strong> <span class="mono">{{ item.where }}</span></div>
+        <div class="row"><strong>Recommended fix:</strong> {{ item.recommended_fix }}</div>
+        <div class="row"><strong>Supporting findings:</strong> {{ item.supporting_findings_count }}</div>
+        {% if item.example_files %}
+          <div class="row"><strong>Example files:</strong> <span class="mono">{{ item.example_files|join(", ") }}</span></div>
+        {% endif %}
+      </div>
+    {%- endmacro %}
+
+    <h2>Top 5 Recommendations</h2>
+    {% for item in action_plan.top_recommendations %}
+      {{ rec_card(item) }}
+    {% else %}
+      <p>No recommendations.</p>
+    {% endfor %}
+
+    <h2>Quick Wins</h2>
+    {% for item in action_plan.quick_wins %}
+      {{ rec_card(item) }}
+    {% else %}
+      <p>No quick wins identified.</p>
+    {% endfor %}
+
+    <h2>Systemic Issues</h2>
+    {% for item in action_plan.systemic_issues %}
+      {{ rec_card(item) }}
+    {% else %}
+      <p>No systemic issues detected.</p>
+    {% endfor %}
+
+    <h2>Architectural Concerns</h2>
+    {% for item in action_plan.architectural_concerns %}
+      {{ rec_card(item) }}
+    {% else %}
+      <p>No architectural concerns highlighted.</p>
+    {% endfor %}
+
+    <h2>Security Concerns</h2>
+    {% for item in action_plan.security_concerns %}
+      {{ rec_card(item) }}
+    {% else %}
+      <p>No security concerns highlighted.</p>
+    {% endfor %}
+  </body>
+</html>

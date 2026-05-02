@@ -9,6 +9,11 @@ from codegauge.domain.models import Language, Project
 from codegauge.parsers.base import ScannerParser
 from codegauge.parsers.base import FindingPathInvalidError
 from codegauge.scanners.base import Scanner
+from codegauge.scanners.coverage_scanner import CoverageScanner
+from codegauge.scanners.phpstan_scanner import PHPStanScanner
+from codegauge.scanners.pyright_scanner import PyrightScanner
+from codegauge.scanners.vulture_scanner import VultureScanner
+from codegauge.scanners.radon_scanner import RadonScanner
 from codegauge.services.parser_registry import ParserRegistry
 from codegauge.services.scan_orchestrator import ScanOrchestrator
 from codegauge.services.scanner_registry import ScannerRegistry
@@ -154,3 +159,28 @@ def test_scanner_contract_violation_fails_closed(tmp_path: Path) -> None:
     assert len(results) == 1
     assert results[0].success is False
     assert results[0].error_code == "scanner_contract_violation"
+
+
+def test_pyright_supports_explicit_file_list() -> None:
+    scanner = PyrightScanner()
+    assert scanner.supports_explicit_file_list() is True
+
+
+def test_vulture_supports_explicit_file_list() -> None:
+    scanner = VultureScanner()
+    assert scanner.supports_explicit_file_list() is True
+
+
+def test_radon_supports_explicit_file_list() -> None:
+    scanner = RadonScanner()
+    assert scanner.supports_explicit_file_list() is True
+
+
+def test_coverage_supports_explicit_file_list() -> None:
+    scanner = CoverageScanner()
+    assert scanner.supports_explicit_file_list() is True
+
+
+def test_phpstan_supports_explicit_file_list() -> None:
+    scanner = PHPStanScanner()
+    assert scanner.supports_explicit_file_list() is True

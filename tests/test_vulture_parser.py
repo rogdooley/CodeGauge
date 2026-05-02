@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 from codegauge.domain.models import Category, Language, Project, Severity
 from codegauge.parsers.vulture_parser import VultureParser
@@ -51,3 +52,20 @@ def test_vulture_findings_flow_through_orchestrator(tmp_path: Path) -> None:
     assert results[0].success is True
     assert len(results[0].findings) == 1
     assert results[0].findings[0].category == Category.dead_code
+
+
+def test_vulture_empty_nonzero_treated_as_success(tmp_path: Path, monkeypatch) -> None:
+    scanner = VultureScanner()
+    project = Project(name=tmp_path.name, path=tmp_path, language_hints=[Language.python])
+    parser_registry = ParserRegistry([VultureParser()])
+
+    monkeypatch.setattr(
+        "codegauge.scanners.vulture_scanner.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=3, stdout="", stderr=""),
+    )
+
+    orchestrator = ScanOrchestrator(ScannerRegistry([scanner]), parser_registry)
+    results = orchestrator.run(project)
+    assert len(results) == 1
+    assert results[0].success is True
+    assert results[0].findings == []

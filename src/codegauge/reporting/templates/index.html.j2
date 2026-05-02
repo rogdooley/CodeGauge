@@ -28,6 +28,20 @@
       </tbody>
     </table>
 
+    <h2>Language Distribution</h2>
+    <table>
+      <thead>
+        <tr><th>Language</th><th>Projects</th></tr>
+      </thead>
+      <tbody>
+        {% for language, count in summary.language_distribution.items() %}
+        <tr><td>{{ language }}</td><td>{{ count }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">No language metadata available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
     <table>
       <thead>
         <tr>

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeGauge Report - {{ project }}</title>
+    <style>
+      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 1.25rem; color: #1f2937; background: #f8fafc; }
+      .muted { color: #4b5563; }
+      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 0.9rem; margin-bottom: 0.9rem; background: #fff; }
+      .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
+      .title { margin: 0; font-size: 1.5rem; }
+      .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+      .btn { border: 1px solid #cbd5e1; border-radius: 9999px; padding: 0.3rem 0.7rem; text-decoration: none; color: #0f172a; background: #fff; font-size: 0.9rem; }
+      .btn.primary { background: #0f172a; color: #fff; border-color: #0f172a; }
+      .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; }
+      .score { border: 1px solid #d1d5db; border-radius: 8px; padding: 0.6rem; background: #fff; }
+      .score .label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; }
+      .score .value { font-size: 1.15rem; font-weight: 700; }
+      .policy-pass { border-color: #86efac; background: #f0fdf4; }
+      .policy-warn { border-color: #fcd34d; background: #fffbeb; }
+      .policy-fail { border-color: #fca5a5; background: #fef2f2; }
+      .grade-A { color: #166534; }
+      .grade-B { color: #1d4ed8; }
+      .grade-C { color: #92400e; }
+      .grade-D, .grade-F { color: #b91c1c; }
+      .delta-up { color: #166534; }
+      .delta-down { color: #b91c1c; }
+      .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; }
+      ul { margin: 0.4rem 0 0 1rem; padding: 0; }
+      li { margin-bottom: 0.25rem; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #e2e8f0; padding: 0.4rem; text-align: left; vertical-align: top; }
+      th { background: #f8fafc; }
+      @media (max-width: 900px) {
+        .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .two-col { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="row">
+        <div>
+          <h1 class="title">{{ project }}</h1>
+          <div class="muted mono">{{ generated_local }}{% if generated_at %} ({{ generated_at }}){% endif %}</div>
+        </div>
+        <div class="actions">
+          <a class="btn primary" href="{{ links.details }}">View Details</a>
+          <a class="btn" href="{{ links.summary }}">JSON</a>
+          <a class="btn" href="{{ links.findings }}">Findings</a>
+          <a class="btn" href="{{ links.raw }}">Raw</a>
+          <a class="btn" href="{{ links.history }}">History</a>
+          <a class="btn" href="{{ links.latest }}">Latest</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      {% set policy_class = "policy-" + (policy_status|lower) %}
+      {% set grade_class = "grade-" + (grade|string) %}
+      <div class="score-grid">
+        <div class="score"><div class="label">Score</div><div class="value">{{ "%.2f"|format(score) }}</div></div>
+        <div class="score"><div class="label">Grade</div><div class="value {{ grade_class }}">{{ grade or "-" }}</div></div>
+        <div class="score {{ policy_class }}"><div class="label">Policy</div><div class="value">{{ policy_status }}</div></div>
+        <div class="score">
+          <div class="label">Delta</div>
+          {% if delta is not none %}
+          <div class="value {{ 'delta-up' if delta >= 0 else 'delta-down' }}">{{ "%+.2f"|format(delta) }}</div>
+          {% else %}
+          <div class="value">n/a</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Executive Summary</h2>
+      <p>{{ action_plan.executive_summary or "No executive summary available." }}</p>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <h2>Top Recommendations</h2>
+        <ul>
+          {% for rec in action_plan.top_recommendations %}
+          <li><strong>{{ rec.priority }}</strong> - {{ rec.title }}</li>
+          {% else %}
+          <li>No recommendations.</li>
+          {% endfor %}
+        </ul>
+        <h2>Quick Wins</h2>
+        <ul>
+          {% for rec in action_plan.quick_wins %}
+          <li>{{ rec.title }} ({{ rec.effort }})</li>
+          {% else %}
+          <li>No quick wins.</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Security Concerns</h2>
+        <ul>
+          {% for item in action_plan.security_concerns or [] %}
+          <li>{{ item.title if item.title is defined else item }}</li>
+          {% else %}
+          <li>No security concerns.</li>
+          {% endfor %}
+        </ul>
+        <h2>Architecture Concerns</h2>
+        <ul>
+          {% for item in action_plan.architectural_concerns or [] %}
+          <li>{{ item.title if item.title is defined else item }}</li>
+          {% else %}
+          <li>No architectural concerns.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Key Metrics</h2>
+      <table>
+        <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for key, value in key_metrics.items() %}
+          <tr>
+            <td class="mono">{{ key }}</td>
+            <td>
+              {% if value is mapping %}
+              <table>
+                <thead><tr><th>Key</th><th>Count</th></tr></thead>
+                <tbody>
+                  {% for sub_key, sub_value in value.items() %}
+                  <tr><td class="mono">{{ sub_key }}</td><td>{{ sub_value }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% else %}
+              {{ value }}
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2">No scalar metrics.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>

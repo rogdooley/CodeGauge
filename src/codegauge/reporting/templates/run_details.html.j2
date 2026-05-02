@@ -4,52 +4,107 @@
     <meta charset="utf-8" />
     <title>CodeGauge Details - {{ project }}</title>
     <style>
-      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
-      th, td { border: 1px solid #d1d5db; padding: 0.45rem; text-align: left; }
-      th { background: #f3f4f6; }
+      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 1.25rem; color: #1f2937; background: #f8fafc; }
+      .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 0.9rem; margin-bottom: 0.9rem; background: #fff; }
       .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-      .status { margin-bottom: 1rem; color: #4b5563; }
-      .false-positive { border: 1px dashed #9ca3af; padding: 0.75rem; background: #f9fafb; }
+      .muted { color: #4b5563; }
+      .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.7rem; flex-wrap: wrap; }
+      .actions { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+      .btn { border: 1px solid #cbd5e1; border-radius: 9999px; padding: 0.3rem 0.7rem; text-decoration: none; color: #0f172a; background: #fff; font-size: 0.9rem; }
+      .btn.primary { background: #0f172a; border-color: #0f172a; color: #fff; }
+      .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.55rem; }
+      .stat { border: 1px solid #d1d5db; border-radius: 8px; padding: 0.55rem; background: #fff; }
+      .stat .label { color: #64748b; font-size: 0.75rem; text-transform: uppercase; }
+      .stat .value { font-size: 1.1rem; font-weight: 700; }
+      .policy-PASS { border-color: #86efac; background: #f0fdf4; }
+      .policy-WARN { border-color: #fcd34d; background: #fffbeb; }
+      .policy-FAIL { border-color: #fca5a5; background: #fef2f2; }
+      .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 0.5rem; }
+      th, td { border: 1px solid #d1d5db; padding: 0.45rem; text-align: left; vertical-align: top; }
+      th { background: #f3f4f6; }
+      ul { margin-top: 0.4rem; margin-bottom: 0.4rem; padding-left: 1rem; }
+      li { margin-bottom: 0.2rem; }
+      @media (max-width: 1100px) {
+        .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      @media (max-width: 900px) {
+        .grid-2 { grid-template-columns: 1fr; }
+        .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
     </style>
   </head>
   <body>
-    <h1>Details: {{ project }}</h1>
-    <p class="status mono">{{ generated_local }}{% if generated_at %} ({{ generated_at }}){% endif %}</p>
+    <div class="card">
+      <div class="row">
+        <div>
+          <h1 style="margin:0;">{{ project }}</h1>
+          <div class="mono muted">{{ generated_local }}{% if generated_at %} ({{ generated_at }}){% endif %}</div>
+        </div>
+        <div class="actions">
+          <a class="btn" href="../../index.html">Back to Portfolio</a>
+          <a class="btn primary" href="{{ links.raw }}">Download Bundle</a>
+          <a class="btn" href="{{ links.summary }}">summary.json</a>
+          <a class="btn" href="{{ links.findings }}">findings.json</a>
+          <a class="btn" href="{{ links.action_plan }}">action-plan.json</a>
+          <a class="btn" href="#raw-artifacts">Raw Artifacts</a>
+        </div>
+      </div>
+    </div>
 
-    <h2>Findings by Severity</h2>
-    <table>
-      <thead><tr><th>Severity</th><th>Count</th></tr></thead>
-      <tbody>
-        {% for severity, count in severity_counts.items() %}
-        <tr><td>{{ severity }}</td><td>{{ count }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><div class="label">Score</div><div class="value">{{ "%.2f"|format(score) }}</div></div>
+        <div class="stat"><div class="label">Grade</div><div class="value">{{ grade or "-" }}</div></div>
+        <div class="stat policy-{{ policy_status }}"><div class="label">Policy</div><div class="value">{{ policy_status }}</div></div>
+        <div class="stat"><div class="label">Findings</div><div class="value">{{ total_findings }}</div></div>
+        <div class="stat"><div class="label">Security</div><div class="value">{{ security_total }}</div></div>
+        <div class="stat"><div class="label">Delta</div><div class="value">{% if trend.delta is not none %}{{ "%+.2f"|format(trend.delta) }}{% else %}n/a{% endif %}</div></div>
+      </div>
+      <div class="stats" style="margin-top:0.55rem;">
+        <div class="stat"><div class="label">Debt</div><div class="value">{{ debt }}</div></div>
+        <div class="stat"><div class="label">Scanner Failures</div><div class="value">{{ scanner_failures }}</div></div>
+      </div>
+    </div>
 
-    <h2>Most Affected Files</h2>
-    <table>
-      <thead><tr><th>File</th><th>Findings</th></tr></thead>
-      <tbody>
-        {% for row in most_affected_files %}
-        <tr><td class="mono">{{ row.file }}</td><td>{{ row.count }}</td></tr>
-        {% else %}
-        <tr><td colspan="2">No file-level findings.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="grid-2">
+      <div class="card">
+        <h2>Action Plan</h2>
+        <h3>Highest Priority</h3>
+        <ul>
+          {% for rec in action_plan.top_recommendations or [] %}
+          <li><a href="{{ links.details }}#raw-artifacts">{{ rec.title }}</a> — Priority: {{ "%.1f"|format(rec.priority_score|default(0.0)) }}</li>
+          {% else %}
+          <li>No high-priority recommendations.</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Security Summary</h2>
+        <table>
+          <tbody>
+            <tr><th>Runtime</th><td>{{ security_groups.runtime|length }}</td></tr>
+            <tr><th>Tooling</th><td>{{ security_groups.tooling|length }}</td></tr>
+            <tr><th>Test-only</th><td>{{ security_groups.test_only|length }}</td></tr>
+            <tr><th>False positives</th><td>{{ security_groups.false_positive|length }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
-    <h2>Rule Family Breakdown</h2>
-    <table>
-      <thead><tr><th>Rule Family</th><th>Count</th></tr></thead>
-      <tbody>
-        {% for row in rule_families %}
-        <tr><td class="mono">{{ row.rule_family }}</td><td>{{ row.count }}</td></tr>
-        {% else %}
-        <tr><td colspan="2">No rule families.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="card">
+      <h2>Top Affected Files</h2>
+      <table>
+        <thead><tr><th>File</th><th>Findings</th></tr></thead>
+        <tbody>
+          {% for row in most_affected_files %}
+          <tr><td class="mono"><a href="{{ links.findings }}">{{ row.file }}</a></td><td>{{ row.count }}</td></tr>
+          {% else %}
+          <tr><td colspan="2">No file-level findings.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
 
     <h2>Clustered Findings (Severity-First)</h2>
     <table>
@@ -70,20 +125,12 @@
     </table>
 
     <h2>Security Findings by Classification</h2>
-
     <h3>Runtime</h3>
     <table>
       <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
       <tbody>
         {% for row in security_groups.runtime %}
-        <tr>
-          <td>{{ row.severity }}</td>
-          <td class="mono">{{ row.rule_id }}</td>
-          <td class="mono">{{ row.file }}</td>
-          <td>{{ row.line if row.line is not none else "-" }}</td>
-          <td>{{ row.score_weight }}</td>
-          <td>{{ row.message }}</td>
-        </tr>
+        <tr><td>{{ row.severity }}</td><td class="mono">{{ row.rule_id }}</td><td class="mono">{{ row.file }}</td><td>{{ row.line if row.line is not none else "-" }}</td><td>{{ row.score_weight }}</td><td>{{ row.message }}</td></tr>
         {% else %}
         <tr><td colspan="6">No runtime security findings.</td></tr>
         {% endfor %}
@@ -95,14 +142,7 @@
       <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
       <tbody>
         {% for row in security_groups.tooling %}
-        <tr>
-          <td>{{ row.severity }}</td>
-          <td class="mono">{{ row.rule_id }}</td>
-          <td class="mono">{{ row.file }}</td>
-          <td>{{ row.line if row.line is not none else "-" }}</td>
-          <td>{{ row.score_weight }}</td>
-          <td>{{ row.message }}</td>
-        </tr>
+        <tr><td>{{ row.severity }}</td><td class="mono">{{ row.rule_id }}</td><td class="mono">{{ row.file }}</td><td>{{ row.line if row.line is not none else "-" }}</td><td>{{ row.score_weight }}</td><td>{{ row.message }}</td></tr>
         {% else %}
         <tr><td colspan="6">No tooling security findings.</td></tr>
         {% endfor %}
@@ -114,39 +154,72 @@
       <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
       <tbody>
         {% for row in security_groups.test_only %}
-        <tr>
-          <td>{{ row.severity }}</td>
-          <td class="mono">{{ row.rule_id }}</td>
-          <td class="mono">{{ row.file }}</td>
-          <td>{{ row.line if row.line is not none else "-" }}</td>
-          <td>{{ row.score_weight }}</td>
-          <td>{{ row.message }}</td>
-        </tr>
+        <tr><td>{{ row.severity }}</td><td class="mono">{{ row.rule_id }}</td><td class="mono">{{ row.file }}</td><td>{{ row.line if row.line is not none else "-" }}</td><td>{{ row.score_weight }}</td><td>{{ row.message }}</td></tr>
         {% else %}
         <tr><td colspan="6">No test-only security findings.</td></tr>
         {% endfor %}
       </tbody>
     </table>
 
-    <div class="false-positive">
-      <h3>False Positive (Non-actionable)</h3>
-      <table>
-        <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
-        <tbody>
-          {% for row in security_groups.false_positive %}
-          <tr>
-            <td>{{ row.severity }}</td>
-            <td class="mono">{{ row.rule_id }}</td>
-            <td class="mono">{{ row.file }}</td>
-            <td>{{ row.line if row.line is not none else "-" }}</td>
-            <td>{{ row.score_weight }}</td>
-            <td>{{ row.message }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="6">No false positives.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <h3>False Positive (Non-actionable)</h3>
+    <table>
+      <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Weight</th><th>Message</th></tr></thead>
+      <tbody>
+        {% for row in security_groups.false_positive %}
+        <tr><td>{{ row.severity }}</td><td class="mono">{{ row.rule_id }}</td><td class="mono">{{ row.file }}</td><td>{{ row.line if row.line is not none else "-" }}</td><td>{{ row.score_weight }}</td><td>{{ row.message }}</td></tr>
+        {% else %}
+        <tr><td colspan="6">No false positives.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Findings by Severity</h2>
+    <table>
+      <thead><tr><th>Severity</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for severity, count in severity_counts.items() %}
+        <tr><td>{{ severity }}</td><td>{{ count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Rule Family Breakdown</h2>
+    <table>
+      <thead><tr><th>Rule Family</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for row in rule_families %}
+        <tr><td class="mono">{{ row.rule_family }}</td><td>{{ row.count }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">No rule families.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>Inventory</h2>
+        <table>
+          <tbody>
+            <tr><th>Files Seen</th><td>{{ runtime.inventory.files_seen if runtime.inventory is mapping else "-" }}</td></tr>
+            <tr><th>First Party</th><td>{{ runtime.inventory.first_party if runtime.inventory is mapping else "-" }}</td></tr>
+            <tr><th>Excluded</th><td>{{ runtime.inventory.excluded if runtime.inventory is mapping else "-" }}</td></tr>
+            <tr><th>Generated</th><td>{{ runtime.inventory.generated if runtime.inventory is mapping else "-" }}</td></tr>
+            <tr><th>Third Party</th><td>{{ runtime.inventory.third_party if runtime.inventory is mapping else "-" }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Parser Health</h2>
+        <table>
+          <tbody>
+            <tr><th>Schema errors</th><td>{{ parser_health.get("CODEGAUGE.PARSER.SCHEMA_ERROR", 0) if parser_health is mapping else "-" }}</td></tr>
+            <tr><th>Invalid path</th><td>{{ parser_health.get("CODEGAUGE.PARSER.INVALID_PATH", 0) if parser_health is mapping else "-" }}</td></tr>
+            <tr><th>Missing rule id</th><td>{{ parser_health.get("CODEGAUGE.PARSER.MISSING_RULE_ID", 0) if parser_health is mapping else "-" }}</td></tr>
+            <tr><th>Unhandled</th><td>{{ parser_health.get("CODEGAUGE.PARSER.UNHANDLED", 0) if parser_health is mapping else "-" }}</td></tr>
+            <tr><th>Status</th><td>{{ "Healthy" if parser_health is mapping and parser_health.get("CODEGAUGE.PARSER.SCHEMA_ERROR", 0) == 0 and parser_health.get("CODEGAUGE.PARSER.INVALID_PATH", 0) == 0 and parser_health.get("CODEGAUGE.PARSER.UNHANDLED", 0) == 0 else "Attention Needed" }}</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <h2>Trend vs Previous Run</h2>
@@ -155,17 +228,6 @@
         <tr><th>Current Score</th><td>{{ "%.2f"|format(trend.current_score) }}</td></tr>
         <tr><th>Previous Score</th><td>{% if trend.previous_score is not none %}{{ "%.2f"|format(trend.previous_score) }}{% else %}n/a{% endif %}</td></tr>
         <tr><th>Delta</th><td>{% if trend.delta is not none %}{{ "%+.2f"|format(trend.delta) }}{% else %}n/a{% endif %}</td></tr>
-      </tbody>
-    </table>
-
-    <h2>Runtime Metadata</h2>
-    <table>
-      <tbody>
-        <tr><th>Scanner Count</th><td>{{ runtime.scanner_count }}</td></tr>
-        <tr><th>Successful Scanners</th><td>{{ runtime.successful_scanners }}</td></tr>
-        <tr><th>Failed Scanners</th><td>{{ runtime.failed_scanners }}</td></tr>
-        <tr><th>Parser Summary</th><td class="mono">{{ runtime.parser_summary }}</td></tr>
-        <tr><th>Inventory</th><td class="mono">{{ runtime.inventory }}</td></tr>
       </tbody>
     </table>
 

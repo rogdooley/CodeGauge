@@ -14,7 +14,7 @@ class ReverseProxyScanScanner(Scanner):
         return True
 
     def build_command(self, project_path: Path) -> list[str]:
-        script = """
+        script = r"""
 import json
 import pathlib
 import re

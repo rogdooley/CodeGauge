@@ -52,6 +52,21 @@ def test_bandit_command_generation(tmp_path: Path) -> None:
     assert command[-2:] == ["-x", "tests"]
 
 
+def test_bandit_file_list_respects_exclude_patterns(tmp_path: Path) -> None:
+    src_file = tmp_path / "src" / "app.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text("print('ok')\n")
+    test_file = tmp_path / "tests" / "test_app.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("assert True\n")
+
+    scanner = BanditScanner(extra_args=["-x", "tests"])
+    command = scanner.build_command_for_files(tmp_path, [src_file, test_file])
+
+    assert str(src_file) in command
+    assert str(test_file) not in command
+
+
 class GoodOutputBanditScanner(BanditScanner):
     def is_available(self) -> bool:
         return True

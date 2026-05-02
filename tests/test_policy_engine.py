@@ -189,3 +189,76 @@ def test_policy_reason_order_is_deterministic() -> None:
         PolicyReason.high_security_findings,
         PolicyReason.low_score,
     ]
+
+
+def test_policy_fails_for_secrets_specific_reasons() -> None:
+    engine = CodeGaugePolicyEngine()
+    policy = engine.evaluate(
+        score_card=_score_card([]),
+        metrics=[],
+        scanner_failures=0,
+        parser_missing=0,
+        invalid_findings=0,
+        invalid_paths=0,
+        real_secret_findings=2,
+        private_key_findings=1,
+        baseline_real_secret_entries=1,
+    )
+    assert policy.status == PolicyStatus.fail
+    assert policy.reasons == [
+        PolicyReason.real_secret_exposure,
+        PolicyReason.private_key_material,
+        PolicyReason.baseline_real_secret_prohibited,
+    ]
+
+
+def test_policy_warns_for_history_skipped_and_secret_scanner_unavailable() -> None:
+    engine = CodeGaugePolicyEngine()
+    policy = engine.evaluate(
+        score_card=_score_card([]),
+        metrics=[],
+        scanner_failures=0,
+        parser_missing=0,
+        invalid_findings=0,
+        invalid_paths=0,
+        history_scan_skipped=True,
+        secret_scanner_unavailable_count=2,
+    )
+    assert policy.status == PolicyStatus.warn
+    assert policy.reasons == [
+        PolicyReason.history_scan_skipped,
+        PolicyReason.secret_scanner_unavailable,
+    ]
+
+
+def test_policy_warns_for_probable_secret_exposure_only() -> None:
+    engine = CodeGaugePolicyEngine()
+    policy = engine.evaluate(
+        score_card=_score_card([]),
+        metrics=[],
+        scanner_failures=0,
+        parser_missing=0,
+        invalid_findings=0,
+        invalid_paths=0,
+        probable_secret_findings=2,
+    )
+    assert policy.status == PolicyStatus.warn
+    assert PolicyReason.probable_secret_exposure in policy.reasons
+    assert all("real credential/secret" not in item for item in policy.violations)
+
+
+def test_policy_fails_when_real_and_probable_secret_exposure_present() -> None:
+    engine = CodeGaugePolicyEngine()
+    policy = engine.evaluate(
+        score_card=_score_card([]),
+        metrics=[],
+        scanner_failures=0,
+        parser_missing=0,
+        invalid_findings=0,
+        invalid_paths=0,
+        probable_secret_findings=3,
+        real_secret_findings=1,
+    )
+    assert policy.status == PolicyStatus.fail
+    assert PolicyReason.real_secret_exposure in policy.reasons
+    assert PolicyReason.probable_secret_exposure in policy.reasons

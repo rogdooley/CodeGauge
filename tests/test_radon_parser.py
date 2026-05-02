@@ -31,6 +31,18 @@ def test_radon_parser_extracts_scalar_metrics_only() -> None:
     assert scalar["maintainability_grade"] == "B"
 
 
+def test_radon_parser_extracts_mi_from_object_entries() -> None:
+    parser = RadonParser()
+    stdout = (
+        '{"cc":{"src/a.py":[{"name":"f","type":"function","complexity":7,"rank":"B"}]},'
+        '"mi":{"src/a.py":{"mi":81.25,"rank":"A"},"src/b.py":{"mi":68.75,"rank":"B"}}}'
+    )
+    metadata = parser.parse_metadata(stdout, "", Path.cwd())
+    scalar = metadata["scalar_metrics"]
+    assert scalar["maintainability_index"] == 75.0
+    assert scalar["maintainability_grade"] == "B"
+
+
 class StubRadonScanner(RadonScanner):
     def is_available(self) -> bool:
         return True

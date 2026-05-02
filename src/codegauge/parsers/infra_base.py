@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from ..domain.models import Category, Finding, Language, Severity
 from .base import ScannerOutputInvalidError, normalize_finding_path

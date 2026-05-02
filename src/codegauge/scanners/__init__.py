@@ -1,6 +1,7 @@
 from .base import Scanner
 from .bandit_scanner import BanditScanner
 from .checkstyle_scanner import CheckstyleScanner
+from .composer_audit_scanner import ComposerAuditScanner
 from .coverage_scanner import CoverageScanner
 from .dockerfile_scan_scanner import DockerfileScanScanner
 from .django_check_deploy_scanner import DjangoCheckDeployScanner
@@ -11,21 +12,80 @@ from .compose_scan_scanner import ComposeScanScanner
 from .dependency_check_scanner import DependencyCheckScanner
 from .eslint_scanner import ESLintScanner
 from .errorprone_scanner import ErrorProneScanner
+from .go_coverage_scanner import GoCoverageScanner
+from .go_vet_scanner import GoVetScanner
 from .jacoco_scanner import JaCoCoScanner
 from .js_coverage_scanner import JSCoverageScanner
+from .git_history_secrets_scanner import GitHistorySecretsScanner
+from .gitleaks_scanner import GitleaksScanner
 from .npm_audit_scanner import NpmAuditScanner
 from .open_grep_scanner import OpenGrepScanner
+from .opengrep_go_scanner import OpenGrepGoScanner
 from .opengrep_infra_scanner import OpenGrepInfraScanner
 from .opengrep_java_scanner import OpenGrepJavaScanner
 from .opengrep_js_scanner import OpenGrepJSScanner
+from .opengrep_php_scanner import OpenGrepPHPScanner
 from .pmd_scanner import PMDScanner
+from .phpcs_scanner import PHPCSScanner
+from .phpstan_scanner import PHPStanScanner
 from .pyright_scanner import PyrightScanner
 from .quadlet_scan_scanner import QuadletScanScanner
 from .radon_scanner import RadonScanner
 from .reverse_proxy_scan_scanner import ReverseProxyScanScanner
 from .ruff_scanner import RuffScanner
+from .secrets_heuristic_scanner import SecretsHeuristicScanner
 from .shellcheck_scanner import ShellCheckScanner
 from .spotbugs_scanner import SpotBugsScanner
+from .staticcheck_scanner import StaticcheckScanner
 from .terraform_scan_scanner import TerraformScanScanner
+from .trufflehog_scanner import TruffleHogScanner
 from .typescript_diagnostics_scanner import TypeScriptDiagnosticsScanner
 from .vulture_scanner import VultureScanner
+from .govulncheck_scanner import GovulncheckScanner
+
+__all__ = [
+    "Scanner",
+    "BanditScanner",
+    "CheckstyleScanner",
+    "ComposerAuditScanner",
+    "CoverageScanner",
+    "DockerfileScanScanner",
+    "DjangoCheckDeployScanner",
+    "DjangoOrmHealthScanner",
+    "DjangoSettingsScanScanner",
+    "DjangoTemplateScanScanner",
+    "ComposeScanScanner",
+    "DependencyCheckScanner",
+    "ESLintScanner",
+    "ErrorProneScanner",
+    "GoCoverageScanner",
+    "GoVetScanner",
+    "GovulncheckScanner",
+    "JaCoCoScanner",
+    "JSCoverageScanner",
+    "GitHistorySecretsScanner",
+    "GitleaksScanner",
+    "NpmAuditScanner",
+    "OpenGrepScanner",
+    "OpenGrepGoScanner",
+    "OpenGrepInfraScanner",
+    "OpenGrepJavaScanner",
+    "OpenGrepJSScanner",
+    "OpenGrepPHPScanner",
+    "PMDScanner",
+    "PHPCSScanner",
+    "PHPStanScanner",
+    "PyrightScanner",
+    "QuadletScanScanner",
+    "RadonScanner",
+    "ReverseProxyScanScanner",
+    "RuffScanner",
+    "SecretsHeuristicScanner",
+    "ShellCheckScanner",
+    "SpotBugsScanner",
+    "StaticcheckScanner",
+    "TerraformScanScanner",
+    "TruffleHogScanner",
+    "TypeScriptDiagnosticsScanner",
+    "VultureScanner",
+]

@@ -139,7 +139,20 @@ def _seed_snapshot_reports(reports_dir: Path) -> None:
         )
     )
     (scan_dir / "report.html").write_text("<html><body>report</body></html>")
-    (scan_dir / "action-plan.json").write_text(json.dumps({"schema_version": "1.0.0", "executive_summary": "x"}))
+    (scan_dir / "action-plan.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "executive_summary": "x",
+                "top_recommendations": [
+                    {
+                        "title": "Fix possible binding to all interfaces",
+                        "priority_score": 41.4,
+                    }
+                ],
+            }
+        )
+    )
     (scan_dir / "inventory.json").write_text(json.dumps({}))
     (scan_dir / "policy-resolution.json").write_text(json.dumps({}))
 
@@ -167,3 +180,4 @@ def test_html_snapshot_contains_expected_sections(tmp_path: Path) -> None:
     assert "action-plan.json" in project_html
     details_html = (reports_dir / "projects" / "snap" / "runs" / "2026-01-01_000000" / "details.html").read_text()
     assert "Security Findings by Classification" in details_html
+    assert "Priority: 41.4" in details_html

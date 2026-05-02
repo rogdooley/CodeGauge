@@ -2,34 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from ...reporting.action_priority import compute_priority
 from .models import FindingCluster
 
-_SEVERITY_WEIGHT = {
-    "critical": 100,
-    "high": 70,
-    "medium": 40,
-    "low": 10,
+_SEVERITY_RANK = {
+    "critical": 5,
+    "high": 4,
+    "medium": 3,
+    "low": 2,
     "info": 1,
-}
-
-_BLAST_RADIUS_WEIGHT = {
-    "single_line": 5,
-    "single_file": 15,
-    "multi_file": 30,
-    "systemic": 50,
-}
-
-_CONFIDENCE_WEIGHT = {
-    "high": 20,
-    "medium": 10,
-    "low": 0,
-}
-
-_EFFORT_PENALTY = {
-    "small": -5,
-    "medium": -15,
-    "large": -30,
-    "huge": -50,
 }
 
 
@@ -46,12 +27,7 @@ class RecommendationRanker:
         blast_radius = self._blast_radius(findings)
         confidence = self._confidence_level(findings)
         effort = self._effort(category=category, severity=severity, findings=findings)
-        score = (
-            _SEVERITY_WEIGHT[severity]
-            + _BLAST_RADIUS_WEIGHT[blast_radius]
-            + _CONFIDENCE_WEIGHT[confidence]
-            + _EFFORT_PENALTY[effort]
-        )
+        score, priority_reason = compute_priority(severity=severity, category=category, findings=findings)
 
         files = sorted({str(f.get("file") or "") for f in findings if str(f.get("file") or "")})
         title = self._title_for_cluster(cluster, severity)
@@ -68,15 +44,18 @@ class RecommendationRanker:
             "impact": self._impact_label(severity, blast_radius),
             "supporting_findings_count": len(findings),
             "example_files": files[:3],
+            "priority_score": score,
+            "priority_reason": priority_reason,
             "_score": score,
+            "_severity_rank": _SEVERITY_RANK.get(severity, 0),
         }
 
     @staticmethod
     def recommendation_sort_key(recommendation: Mapping[str, Any]) -> tuple[Any, ...]:
         return (
-            -int(recommendation.get("_score", 0) or 0),
+            -float(recommendation.get("_score", 0.0) or 0.0),
+            -int(recommendation.get("_severity_rank", 0) or 0),
             -int(recommendation.get("supporting_findings_count", 0) or 0),
-            str(recommendation.get("category") or ""),
             str(recommendation.get("title") or ""),
         )
 
@@ -86,7 +65,7 @@ class RecommendationRanker:
         best_weight = -1
         for finding in findings:
             severity = str(finding.get("severity") or "info").lower()
-            weight = _SEVERITY_WEIGHT.get(severity, 1)
+            weight = _SEVERITY_RANK.get(severity, 1)
             if weight > best_weight:
                 best_weight = weight
                 best = severity
@@ -127,12 +106,12 @@ class RecommendationRanker:
         return "medium"
 
     @staticmethod
-    def _priority_label(score: int) -> str:
-        if score >= 130:
+    def _priority_label(score: float) -> str:
+        if score >= 120.0:
             return "Critical"
-        if score >= 90:
+        if score >= 40.0:
             return "High"
-        if score >= 50:
+        if score >= 10.0:
             return "Medium"
         return "Low"
 

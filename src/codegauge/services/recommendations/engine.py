@@ -77,6 +77,7 @@ def strip_internal_scores(action_plan: Mapping[str, Any]) -> dict[str, Any]:
         for item in payload.get(key, []):
             row = dict(item)
             row.pop("_score", None)
+            row.pop("_severity_rank", None)
             cleaned.append(row)
         payload[key] = cleaned
     return payload

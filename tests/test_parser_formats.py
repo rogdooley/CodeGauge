@@ -23,3 +23,12 @@ def test_sarif_format_parser_returns_runs() -> None:
 def test_sarif_format_parser_rejects_invalid_shape() -> None:
     with pytest.raises(ScannerOutputInvalidError):
         parse_sarif_runs('{"version":"2.1.0","runs":"not-a-list"}', scanner_name="sarif")
+
+
+def test_json_parser_strips_prefixed_progress_lines() -> None:
+    payload = parse_json_document(
+        'Working... 100%\n{"ok": true, "results": []}',
+        scanner_name="bandit",
+    )
+    root = require_object(payload, context="root")
+    assert root["ok"] is True

@@ -22,7 +22,7 @@ class ScanOrchestrator:
         results: list[ScanResult] = []
         for scanner in self.registry.enabled_scanners([lang.value for lang in project.language_hints]):
             started_at = datetime.now(UTC)
-            scanner_files = self._scanner_input_files(project, scanner.supported_languages)
+            scanner_files = self._scanner_input_files(project, scanner.scanner_name, scanner.supported_languages)
             if not scanner.is_available():
                 attempted_command = None
                 try:
@@ -181,17 +181,31 @@ class ScanOrchestrator:
         return results
 
     @staticmethod
-    def _scanner_input_files(project: Project, scanner_languages: Sequence[str]) -> list[Path]:
+    def _scanner_input_files(project: Project, scanner_name: str, scanner_languages: Sequence[str]) -> list[Path]:
         language_set = set(scanner_languages)
         config = project.config if isinstance(project.config, dict) else {}
         excludes = list(config.get("exclude", [])) if isinstance(config.get("exclude", []), list) else []
         excludes.extend([".venv/**", ".git/**", ".pytest_cache/**", ".ruff_cache/**", "node_modules/**"])
         root = project.path
+        metadata = project.metadata if isinstance(project.metadata, dict) else {}
+        scan_scope = metadata.get("scan_scope", {}) if isinstance(metadata.get("scan_scope"), dict) else {}
+        zones = scan_scope.get("zones", {}) if isinstance(scan_scope.get("zones"), dict) else {}
+        tracked = zones.get("tracked", []) if isinstance(zones.get("tracked"), list) else []
+        ignored_sensitive = zones.get("ignored_sensitive", []) if isinstance(zones.get("ignored_sensitive"), list) else []
+        if scanner_name in {"gitleaks", "trufflehog", "secrets_heuristic"}:
+            candidate_rel = [str(rel) for rel in [*tracked, *ignored_sensitive]]
+        else:
+            candidate_rel = [str(rel) for rel in tracked]
+        if not candidate_rel:
+            candidate_rel = [path.relative_to(root).as_posix() for path in sorted(root.rglob("*")) if path.is_file()]
+
         patterns: set[str] = set()
         if "general" in language_set:
             patterns.add("*")
         if "python" in language_set:
             patterns.add("*.py")
+        if "php" in language_set:
+            patterns.add("*.php")
         if "javascript" in language_set:
             patterns.update({"*.js", "*.jsx"})
         if "typescript" in language_set:
@@ -205,12 +219,12 @@ class ScanOrchestrator:
         if "terraform" in language_set:
             patterns.update({"*.tf", "*.tfvars"})
         files: list[Path] = []
-        for path in sorted(root.rglob("*")):
+        for rel in sorted(set(candidate_rel)):
+            path = root / rel
             if not path.is_file():
                 continue
             if patterns and not any(fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
                 continue
-            rel = path.relative_to(root).as_posix()
             if any(fnmatch.fnmatch(rel, pattern) for pattern in excludes):
                 continue
             files.append(path)

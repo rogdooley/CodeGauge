@@ -24,9 +24,14 @@ def _default_config() -> dict[str, Any]:
         "exclude": [],
         "enabled_scanners": [],
         "disabled_scanners": [],
-        "scanners": {},
+        "scanners": {
+            "bandit": {
+                "extra_args": ["-x", "tests"],
+            }
+        },
         "thresholds": {},
         "payload": {},
+        "secrets": {},
     }
 
 
@@ -68,12 +73,12 @@ def load_config(
     """
     Load and merge config in this order:
     1) built-in defaults
-    2) ~/.config/codegauge/config.toml
+    2) ~/.config/CodeGauge/config.toml
     3) <project>/.codegauge.toml
     4) explicit CLI overrides
     """
     project_root = _project_root(project_path)
-    global_config_path = Path("~/.config/codegauge/config.toml").expanduser()
+    global_config_path = Path("~/.config/CodeGauge/config.toml").expanduser()
     project_config_path = project_root / ".codegauge.toml"
 
     merged: dict[str, Any] = copy.deepcopy(_default_config())

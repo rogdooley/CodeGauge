@@ -29,6 +29,15 @@ def test_list_scanners_json_shape() -> None:
     by_name = {entry["scanner_name"]: entry for entry in payload}
     assert by_name["ruff"]["expected_parser"] == "ruff_parser"
     assert by_name["pyright"]["expected_parser"] == "pyright_parser"
+    assert by_name["phpstan"]["expected_parser"] == "phpstan_parser"
+    assert by_name["composer_audit"]["expected_parser"] == "composer_audit_parser"
+    assert by_name["phpcs"]["expected_parser"] == "phpcs_parser"
+    assert by_name["opengrep_php"]["expected_parser"] == "opengrep_php_parser"
+    assert by_name["go_vet"]["expected_parser"] == "go_vet_parser"
+    assert by_name["staticcheck"]["expected_parser"] == "staticcheck_parser"
+    assert by_name["govulncheck"]["expected_parser"] == "govulncheck_parser"
+    assert by_name["go_coverage"]["expected_parser"] == "go_coverage_parser"
+    assert by_name["opengrep_go"]["expected_parser"] == "opengrep_go_parser"
     assert by_name["coverage"]["expected_parser"] == "coverage_parser"
     assert by_name["radon"]["expected_parser"] == "radon_parser"
     assert by_name["vulture"]["expected_parser"] == "vulture_parser"
@@ -56,6 +65,10 @@ def test_list_scanners_json_shape() -> None:
     assert by_name["npm_audit"]["expected_parser"] == "npm_audit_parser"
     assert by_name["js_coverage"]["expected_parser"] == "js_coverage_parser"
     assert by_name["opengrep_js"]["expected_parser"] == "opengrep_js_parser"
+    assert by_name["gitleaks"]["expected_parser"] == "gitleaks_parser"
+    assert by_name["trufflehog"]["expected_parser"] == "trufflehog_parser"
+    assert by_name["secrets_heuristic"]["expected_parser"] == "secrets_heuristic_parser"
+    assert by_name["git_history_secrets"]["expected_parser"] == "git_history_secrets_parser"
 
 
 def test_list_scanners_human_output() -> None:

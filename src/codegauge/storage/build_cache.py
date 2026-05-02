@@ -74,7 +74,7 @@ class JavaBuildCacheService:
             module_path = directory.resolve()
             relative = module_path.relative_to(self.project_root.resolve()) if module_path != self.project_root.resolve() else Path(".")
             module_name = self.project_root.name if str(relative) == "." else relative.as_posix().replace("/", "-")
-            module_id = hashlib.sha1(relative.as_posix().encode("utf-8")).hexdigest()[:12]
+            module_id = hashlib.sha256(relative.as_posix().encode("utf-8")).hexdigest()[:12]
             modules.append(JavaModule(module_name=module_name, module_path=module_path, module_id=module_id))
         return modules
 
@@ -392,7 +392,7 @@ class JavaBuildCacheService:
         target_root.mkdir(parents=True, exist_ok=True)
         cached_paths: list[Path] = []
         for artifact in artifact_paths:
-            digest = hashlib.sha1(artifact.resolve().as_posix().encode("utf-8")).hexdigest()[:8]
+            digest = hashlib.sha256(artifact.resolve().as_posix().encode("utf-8")).hexdigest()[:8]
             target = target_root / f"{artifact.name}.{digest}"
             shutil.copy2(artifact, target)
             cached_paths.append(target)

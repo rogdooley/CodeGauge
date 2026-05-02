@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from time import perf_counter
+from typing import Sequence
 
 from ..services.build_runner import select_build_runner
 from .base import Scanner, ScannerCommandResult
@@ -28,7 +29,8 @@ class ErrorProneScanner(Scanner):
         )
         return plan.command
 
-    def execute(self, project_path: Path) -> ScannerCommandResult:
+    def execute(self, project_path: Path, files: Sequence[Path] | None = None) -> ScannerCommandResult:
+        _ = files
         runner = select_build_runner(project_path)
         if runner is None:
             return ScannerCommandResult(
@@ -77,10 +79,12 @@ class ErrorProneScanner(Scanner):
             )
         except subprocess.TimeoutExpired as exc:
             duration = (perf_counter() - start) * 1000
+            stdout = (exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout) or ""
+            stderr = (exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr) or ""
             return ScannerCommandResult(
                 command=command,
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=stdout,
+                stderr=stderr,
                 success=False,
                 duration_ms=duration,
                 error_code="scanner_timeout",

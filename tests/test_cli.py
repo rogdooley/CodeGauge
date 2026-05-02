@@ -43,6 +43,21 @@ def test_scan_runs_with_stub_scanners(tmp_path: Path) -> None:
     assert "Java cache:" not in result.stdout
 
 
+def test_scan_human_output_shows_secret_suppression_rate(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_secret"
+    project.mkdir()
+    (project / ".env").write_text("ENV=dev\n", encoding="utf-8")
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["secrets_heuristic"]\n')
+    monkeypatch.setattr(
+        "codegauge.cli.shutil.which",
+        lambda name: None if name in {"gitleaks", "trufflehog"} else "/usr/bin/git",
+    )
+
+    result = runner.invoke(app, ["secrets", "scan", str(project)])
+    assert result.exit_code == 0
+    assert "Secret scanner noise suppression:" in result.stdout
+
+
 def test_scan_fails_closed_when_no_scanners_resolved(tmp_path: Path) -> None:
     project = tmp_path / "empty_proj"
     project.mkdir()

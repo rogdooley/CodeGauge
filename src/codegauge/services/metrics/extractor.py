@@ -43,6 +43,10 @@ class MetricsExtractor:
                         "typescript_diagnostics",
                         "npm_audit",
                         "opengrep_js",
+                        "gitleaks",
+                        "trufflehog",
+                        "secrets_heuristic",
+                        "git_history_secrets",
                     }
                 ),
                 ScalarMetricProvider(
@@ -81,7 +85,7 @@ class MetricsExtractor:
             deduped, suppressed_now, unique_now = self._dedupe_findings(result, seen_keys)
             unique_count += unique_now
             suppressed.extend(suppressed_now)
-            per_scanner_suppressed.update(entry["tool"] for entry in suppressed_now)
+            per_scanner_suppressed.update(str(entry.get("tool", "")) for entry in suppressed_now)
             deduped_results.append(deduped)
 
         self.last_duplicate_metadata = {

@@ -7,8 +7,18 @@ from ..base import ScannerOutputInvalidError
 
 
 def parse_json_document(stdout: str, *, scanner_name: str) -> Any:
+    payload = stdout.strip()
+    if payload and payload[0] not in "[{":
+        lines = payload.splitlines()
+        for index, line in enumerate(lines):
+            stripped = line.lstrip()
+            if stripped.startswith("{") or stripped.startswith("["):
+                payload = "\n".join(lines[index:]).strip()
+                break
+    if not payload:
+        raise ScannerOutputInvalidError(f"invalid {scanner_name} JSON output: empty payload")
     try:
-        return json.loads(stdout)
+        return json.loads(payload)
     except json.JSONDecodeError as exc:
         raise ScannerOutputInvalidError(f"invalid {scanner_name} JSON output: {exc}") from exc
 

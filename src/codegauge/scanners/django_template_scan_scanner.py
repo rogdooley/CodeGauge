@@ -56,3 +56,10 @@ for path in templates[:1000]:
 print(json.dumps({"findings": findings}))
 """
         return [sys.executable, "-c", script, str(project_path)]
+
+    def supports_explicit_file_list(self) -> bool:
+        return True
+
+    def build_command_for_files(self, project_path: Path, files) -> list[str]:
+        _ = files
+        return self.build_command(project_path)

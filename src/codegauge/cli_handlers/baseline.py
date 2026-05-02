@@ -49,6 +49,17 @@ def baseline_init_handler(
     dedupe_meta = extractor.last_duplicate_metadata
 
     findings = [finding for result in deduped_results if result.success for finding in result.findings]
+    prohibited_real_secrets = [
+        finding
+        for finding in findings
+        if bool(getattr(finding, "raw_payload", {}).get("secret_real"))
+    ]
+    if prohibited_real_secrets:
+        typer.echo(
+            "baseline init rejected: baseline acceptance is prohibited for real secret findings.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
     created_at = datetime.now(UTC)
     expires_at = (created_at + timedelta(days=expires_days)) if expires_days is not None else None
     baseline_service = BaselineService()

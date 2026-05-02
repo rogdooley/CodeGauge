@@ -14,7 +14,7 @@ from ..constants import ExitCode, InternalErrorCode
 from ..policy import CodeGaugePolicyEngine
 from ..reporting import StaticSiteBuilder
 from ..scoring import CodeGaugeScoringEngine
-from ..services.metrics import MetricsExtractor
+from ..services.metrics import MetricsExtractor, finding_fingerprint
 from ..services.recommendation_engine import RecommendationEngine, strip_internal_scores
 from ..services.report_normalizer import FINGERPRINT_VERSION, MESSAGE_NORMALIZER_VERSION, finding_sort_key, normalize_finding_record
 from ..services.security_classifier import SecurityFindingClassifier
@@ -98,6 +98,38 @@ def scan_handler(
             baseline_application.filtered_results,
             dedupe=False,
         )
+        real_secret_findings = sum(
+            1
+            for result in baseline_application.filtered_results
+            if result.success
+            for finding in result.findings
+            if bool(getattr(finding, "raw_payload", {}).get("secret_real"))
+        )
+        private_key_findings = sum(
+            1
+            for result in baseline_application.filtered_results
+            if result.success
+            for finding in result.findings
+            if str(getattr(finding, "rule_id", "")) == "private_key_material"
+        )
+        probable_secret_findings = sum(
+            1
+            for result in baseline_application.filtered_results
+            if result.success
+            for finding in result.findings
+            if str(getattr(finding, "rule_id", "")) == "probable_secret_exposure"
+        )
+        baseline_real_secret_entries = 0
+        active_baseline_fingerprints = baseline_service.active_fingerprints(baseline)
+        if active_baseline_fingerprints:
+            for result in deduped_results:
+                if not result.success:
+                    continue
+                for finding in result.findings:
+                    if not bool(getattr(finding, "raw_payload", {}).get("secret_real")):
+                        continue
+                    if finding_fingerprint(finding, include_tool=True) in active_baseline_fingerprints:
+                        baseline_real_secret_entries += 1
         score_card = scoring_engine.score(metrics)
         score_payload = score_card.model_dump(mode="json")
         score_payload["scalar_metrics"] = collect_scalar_metrics(results)
@@ -124,6 +156,32 @@ def scan_handler(
             baseline_expired_entries=baseline_application.stats.expired_entries,
             baseline_missing_owner_entries=baseline_application.stats.missing_owner_entries,
             baseline_expiring_soon_entries=baseline_application.stats.expiring_soon_entries,
+            real_secret_findings=real_secret_findings,
+            private_key_findings=private_key_findings,
+            probable_secret_findings=probable_secret_findings,
+            baseline_real_secret_entries=baseline_real_secret_entries,
+            history_scan_skipped=(
+                bool(project.metadata.get("history_scan_gate", {}).get("skipped"))
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("history_scan_gate"), dict)
+                else False
+            ),
+            history_scan_stale=(
+                str(project.metadata.get("history_scan_gate", {}).get("history_scan_status")) == "stale"
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("history_scan_gate"), dict)
+                else False
+            ),
+            history_scan_age_days=(
+                int(project.metadata.get("history_scan_gate", {}).get("history_scan_age_days"))
+                if isinstance(project.metadata, dict)
+                and isinstance(project.metadata.get("history_scan_gate"), dict)
+                and isinstance(project.metadata.get("history_scan_gate", {}).get("history_scan_age_days"), int)
+                else None
+            ),
+            secret_scanner_unavailable_count=(
+                len(project.metadata.get("secret_scanner_unavailable", []))
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("secret_scanner_unavailable"), list)
+                else 0
+            ),
         )
         summary = pre_policy_summary.model_copy(update={"policy": policy.model_dump(mode="json")})
         summary_payload = summary.model_dump(mode="json")
@@ -178,6 +236,12 @@ def scan_handler(
                     bucket[key] = parser_summary_global.get(key, 0)
             parser_summary_scanners[scanner_name] = dict(sorted(bucket.items()))
         inventory = dict(project.metadata.get("inventory", {})) if isinstance(project.metadata, dict) else {}
+        if isinstance(project.metadata, dict):
+            scan_scope = project.metadata.get("scan_scope", {})
+            if isinstance(scan_scope, dict):
+                zone_counts = scan_scope.get("zone_counts", {})
+                if isinstance(zone_counts, dict):
+                    inventory.update({str(k): int(v) for k, v in zone_counts.items() if isinstance(v, int)})
         policy_resolution = dict(project.metadata.get("policy_resolution", {})) if isinstance(project.metadata, dict) else {}
         summary_payload["schema_version"] = "2.0.0"
         summary_payload["fingerprint_version"] = FINGERPRINT_VERSION
@@ -211,6 +275,67 @@ def scan_handler(
         summary_payload["security_summary"] = {
             "by_class": dict(sorted(security_by_class.items())),
             "by_context": dict(sorted(security_by_context.items())),
+        }
+        summary_payload["secrets_summary"] = {
+            "real_secret_findings": real_secret_findings,
+            "private_key_findings": private_key_findings,
+            "probable_secret_findings": probable_secret_findings,
+            "baseline_real_secret_entries": baseline_real_secret_entries,
+            "history_scan_skipped": (
+                bool(project.metadata.get("history_scan_gate", {}).get("skipped"))
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("history_scan_gate"), dict)
+                else False
+            ),
+            "history_scan_gate": (
+                dict(project.metadata.get("history_scan_gate", {}))
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("history_scan_gate"), dict)
+                else {}
+            ),
+            "history_scan_status": (
+                str(project.metadata.get("history_scan_gate", {}).get("history_scan_status") or "never_scanned")
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("history_scan_gate"), dict)
+                else "never_scanned"
+            ),
+            "ignored_sensitive_present": (
+                int(project.metadata.get("ignored_sensitive_present", 0))
+                if isinstance(project.metadata, dict)
+                else 0
+            ),
+            "ignored_sensitive_patterns": (
+                int(project.metadata.get("ignored_sensitive_patterns", 0))
+                if isinstance(project.metadata, dict)
+                else 0
+            ),
+            "secret_scanner_unavailable": (
+                list(project.metadata.get("secret_scanner_unavailable", []))
+                if isinstance(project.metadata, dict) and isinstance(project.metadata.get("secret_scanner_unavailable"), list)
+                else []
+            ),
+            "sections": {
+                "Secrets Hygiene": real_secret_findings,
+                "Historical Secret Exposure": sum(
+                    1 for finding in findings_payload if str(finding.get("rule_id")) == "historical_secret_exposure"
+                ),
+                "Key Material Exposure": sum(
+                    1
+                    for finding in findings_payload
+                    if str(finding.get("rule_id")) in {"private_key_material", "certificate_material"}
+                ),
+                "Credential Management": sum(
+                    1
+                    for finding in findings_payload
+                    if str(finding.get("rule_id")) in {"credential_hardcoding", "weak_secret_management"}
+                ),
+            },
+        }
+        summary_payload["secrets_scope"] = {
+            "ignored_sensitive_patterns": (
+                list(project.metadata.get("scan_scope", {}).get("ignored_sensitive_patterns_effective", []))
+                if isinstance(project.metadata, dict)
+                and isinstance(project.metadata.get("scan_scope"), dict)
+                and isinstance(project.metadata.get("scan_scope", {}).get("ignored_sensitive_patterns_effective"), list)
+                else []
+            )
         }
         summary_payload["classifier"] = classifier.provenance()
         report_material = json.dumps(

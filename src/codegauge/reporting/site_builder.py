@@ -70,6 +70,7 @@ class StaticSiteBuilder:
                     "medium": int(latest_manifest.get("medium", 0) or 0),
                     "low": int(latest_manifest.get("low", 0) or 0),
                     "trend_delta": trend_delta,
+                    "language_hints": self._project_languages(latest),
                 }
             )
             self._write_project_page(project_name, history)
@@ -185,6 +186,9 @@ class StaticSiteBuilder:
         runtime = self._runtime_metadata(summary, inventory)
         links = {
             "details": "details.html",
+            "history": "../../index.html",
+            "latest": "../../latest/report.html",
+            "raw": "details.html#raw-artifacts",
             "summary": "summary.json",
             "findings": "findings.json",
             "action_plan": "action-plan.json",
@@ -197,12 +201,17 @@ class StaticSiteBuilder:
 
         report_template = self.environment.get_template("run_report.html.j2")
         details_template = self.environment.get_template("run_details.html.j2")
+        policy_payload = item.get("policy", {})
+        baseline_payload = score.get("baseline", {}) if isinstance(score.get("baseline"), dict) else {}
+        security_total = sum(len(rows) for rows in security_groups.values())
+        parser_global = summary.get("parser_summary", {}).get("global", {}) if isinstance(summary.get("parser_summary"), dict) else {}
         report_html = report_template.render(
             project=project_name,
             generated_at=generated_at,
             generated_local=generated_local,
             score=current_score,
             grade=score.get("grade"),
+            policy_status=str(item.get("policy", {}).get("status", "unknown")).upper(),
             delta=delta,
             action_plan=action_plan,
             key_metrics=score.get("scalar_metrics", {}),
@@ -214,11 +223,20 @@ class StaticSiteBuilder:
             project=project_name,
             generated_at=generated_at,
             generated_local=generated_local,
+            score=current_score,
+            grade=score.get("grade"),
+            policy_status=str(policy_payload.get("status", "unknown")).upper(),
+            total_findings=len(findings),
+            security_total=security_total,
+            debt=int(baseline_payload.get("accepted_debt", 0) or 0),
+            scanner_failures=int(summary.get("scanner_failures", 0) or 0),
             severity_counts=severity_counts,
             clusters=finding_clusters,
             security_groups=security_groups,
+            action_plan=action_plan,
             most_affected_files=most_affected_files,
             rule_families=rule_families,
+            parser_health=parser_global,
             trend={"current_score": current_score, "previous_score": previous_score, "delta": delta},
             runtime=runtime,
             links=links,
@@ -371,11 +389,41 @@ class StaticSiteBuilder:
             if status in status_counts:
                 status_counts[status] += 1
         average_score = round(sum(float(row.get("score", 0.0)) for row in project_rows) / project_count, 2) if project_count else None
+        language_distribution: dict[str, int] = {}
+        for row in project_rows:
+            for language in row.get("language_hints") or []:
+                label = str(language)
+                language_distribution[label] = language_distribution.get(label, 0) + 1
         return {
             "project_count": project_count,
             "pass_count": status_counts["pass"],
             "warn_count": status_counts["warn"],
             "fail_count": status_counts["fail"],
             "average_score": average_score,
+            "language_distribution": dict(sorted(language_distribution.items())),
             "generated_at": __import__("datetime").datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
+
+    @staticmethod
+    def _project_languages(item: dict[str, Any]) -> list[str]:
+        summary = item.get("summary", {}) if isinstance(item.get("summary"), dict) else {}
+        metadata = summary.get("project_metadata", {}) if isinstance(summary.get("project_metadata"), dict) else {}
+        runtime = metadata.get("python_runtime") if isinstance(metadata.get("python_runtime"), dict) else {}
+        languages: set[str] = set()
+        language = runtime.get("language")
+        if isinstance(language, str) and language:
+            languages.add(language)
+        if isinstance(metadata.get("typescript"), dict) or isinstance(metadata.get("javascript"), dict):
+            if isinstance(metadata.get("typescript"), dict):
+                languages.add("typescript")
+            if isinstance(metadata.get("javascript"), dict):
+                languages.add("javascript")
+        if isinstance(metadata.get("java"), dict):
+            languages.add("java")
+        if isinstance(metadata.get("php"), dict):
+            languages.add("php")
+        if isinstance(metadata.get("go"), dict):
+            languages.add("go")
+        if isinstance(metadata.get("infrastructure"), dict):
+            languages.add("general")
+        return sorted(languages)

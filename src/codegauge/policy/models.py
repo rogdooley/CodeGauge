@@ -23,6 +23,13 @@ class PolicyReason(str, Enum):
     critical_security_finding = "critical_security_finding"
     high_security_findings = "high_security_findings"
     low_score = "low_score"
+    real_secret_exposure = "real_secret_exposure"
+    probable_secret_exposure = "probable_secret_exposure"
+    private_key_material = "private_key_material"
+    baseline_real_secret_prohibited = "baseline_real_secret_prohibited"
+    history_scan_skipped = "history_scan_skipped"
+    history_scan_stale = "history_scan_stale"
+    secret_scanner_unavailable = "secret_scanner_unavailable"
 
 
 class QualityPolicyResult(BaseModel):

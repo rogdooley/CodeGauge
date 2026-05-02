@@ -77,6 +77,27 @@ def test_fastapi_style_settings_file_does_not_trigger_django_detection(tmp_path:
     assert runtime["framework_confidence"] >= 0.7
 
 
+def test_venv_files_are_ignored_for_framework_and_infra_detection(tmp_path: Path) -> None:
+    proj = tmp_path / "proj-with-venv"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.1.0'\n")
+    app_py = proj / "app.py"
+    app_py.write_text("from fastapi import FastAPI\napp = FastAPI()\n")
+
+    venv_settings = proj / ".venv" / "lib" / "python3.14" / "site-packages" / "fakepkg" / "settings.py"
+    venv_settings.parent.mkdir(parents=True, exist_ok=True)
+    venv_settings.write_text("from django.conf import settings\n")
+    venv_shell = proj / ".venv" / "lib" / "python3.14" / "site-packages" / "fakepkg" / "vendor_install.sh"
+    venv_shell.write_text("#!/bin/sh\necho vendor\n")
+
+    project = ProjectDiscoveryService().discover(proj)
+    runtime = project.metadata.get("python_runtime")
+    assert isinstance(runtime, dict)
+    assert runtime["framework"] == "fastapi"
+    assert project.metadata.get("django") is None
+    assert project.metadata.get("infrastructure") is None
+
+
 def test_generic_python_framework_detected_with_low_confidence(tmp_path: Path) -> None:
     proj = tmp_path / "generic-python"
     proj.mkdir()
@@ -134,3 +155,34 @@ def test_infrastructure_project_detected_with_metadata(tmp_path: Path) -> None:
     assert "terraform" in infra_meta["frameworks"]
     assert "shell" in infra_meta["frameworks"]
     assert "dockerfile_scan" in infra_meta["profile"]["scanners"]
+
+
+def test_php_project_detected_with_framework_metadata(tmp_path: Path) -> None:
+    proj = tmp_path / "php-proj"
+    proj.mkdir()
+    (proj / "composer.json").write_text('{"require": {"laravel/framework": "^10"}}')
+    (proj / "index.php").write_text("<?php echo 'ok';")
+
+    project = ProjectDiscoveryService().discover(proj)
+    assert Language.php in project.language_hints
+    php_meta = project.metadata.get("php")
+    assert isinstance(php_meta, dict)
+    assert php_meta["framework"] == "laravel"
+    assert "phpstan" in php_meta["profile"]["scanners"]
+
+
+def test_go_project_detected_with_framework_metadata(tmp_path: Path) -> None:
+    proj = tmp_path / "go-proj"
+    proj.mkdir()
+    (proj / "go.mod").write_text(
+        "module example.com/demo\n\nrequire github.com/gin-gonic/gin v1.10.0\n",
+        encoding="utf-8",
+    )
+    (proj / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+
+    project = ProjectDiscoveryService().discover(proj)
+    assert Language.go in project.language_hints
+    go_meta = project.metadata.get("go")
+    assert isinstance(go_meta, dict)
+    assert go_meta["framework"] == "gin"
+    assert "go_vet" in go_meta["profile"]["scanners"]

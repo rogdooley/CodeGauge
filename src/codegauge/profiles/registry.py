@@ -3,10 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .django_profile import DjangoProfile
+from .go_profile import GoProfile
 from .infrastructure_profile import InfrastructureProfile
 from .java_profile import JavaProfile
 from .javascript_profile import JavaScriptProfile, TypeScriptProfile
+from .php_profile import PHPProfile
 from .python_profile import PythonProfile
+from .secrets_profile import SecretsProfile
 
 
 @dataclass(frozen=True)
@@ -55,5 +58,8 @@ class ProfileRegistry:
         registry.register(_spec_from_profile(JavaProfile()))
         registry.register(_spec_from_profile(JavaScriptProfile()))
         registry.register(_spec_from_profile(TypeScriptProfile()))
+        registry.register(_spec_from_profile(PHPProfile()))
+        registry.register(_spec_from_profile(GoProfile()))
         registry.register(_spec_from_profile(InfrastructureProfile()))
+        registry.register(_spec_from_profile(SecretsProfile()))
         return registry

@@ -40,6 +40,9 @@ def _write_run(
         "scanner_failures": 0,
         "duration_ms": 40.0,
         "results": [{"scanner_name": "ruff", "success": True, "error_code": None, "finding_count": 1, "duration_ms": 20.0}],
+        "project_metadata": {
+            "python_runtime": {"language": "python", "framework": "generic", "framework_confidence": 0.4}
+        },
         "schema_version": "2.0.0",
     }
     findings = []
@@ -114,6 +117,8 @@ def test_build_site_generates_portal_and_project_indexes(tmp_path: Path) -> None
 
     assert "CodeGauge Report Portal" in index
     assert "Project Count" in index
+    assert "Language Distribution" in index
+    assert "python" in index
     assert "alpha" in index and "beta" in index
     assert "projects/alpha/index.html" in index
     assert "projects/beta/index.html" in index

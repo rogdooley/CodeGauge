@@ -17,7 +17,8 @@ class NPMAuditParser(ScannerParser):
             return []
         envelope = parse_json_document(stdout, scanner_name="npm_audit")
         root = require_object(envelope, context="npm audit envelope")
-        audit_stdout = root.get("stdout") if isinstance(root.get("stdout"), str) else stdout
+        raw_stdout = root.get("stdout")
+        audit_stdout = raw_stdout if isinstance(raw_stdout, str) else stdout
         tool_name = str(root.get("tool") or "npm")
         payload = parse_json_document(audit_stdout, scanner_name="npm_audit")
         root = require_object(payload, context="npm audit payload")

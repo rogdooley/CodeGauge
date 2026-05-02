@@ -2,7 +2,7 @@
 
 from .base import FindingMetricProvider, MetricProvider, ScalarMetricProvider
 from .extractor import MetricsExtractor
-from .fingerprint import finding_fingerprint, normalize_finding_message
+from .fingerprint import finding_fingerprint
 
 __all__ = [
     "FindingMetricProvider",
@@ -10,5 +10,4 @@ __all__ = [
     "MetricsExtractor",
     "ScalarMetricProvider",
     "finding_fingerprint",
-    "normalize_finding_message",
 ]
