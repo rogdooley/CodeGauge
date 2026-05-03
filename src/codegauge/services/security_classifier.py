@@ -8,6 +8,7 @@ from ..domain.models import Category, Finding, ScanResult
 
 _RUNTIME_PREFIXES = ("src/", "app/", "services/", "api/", "middleware/")
 _TOOLING_PREFIXES = ("tools/", "scripts/", "dev/", "maintenance/")
+_DOCUMENTATION_PREFIXES = ("docs/", "documentation/", "designdocuments/", "readme/")
 _FALSE_POSITIVE_B105_LITERALS = {"", '""', "(", ")", "NOT", "AND", "OR"}
 
 
@@ -16,6 +17,7 @@ class ClassificationReason(StrEnum):
     PATH_RUNTIME = "path_runtime"
     PATH_TOOLING = "path_tooling"
     PATH_TEST = "path_test"
+    PATH_DOCUMENTATION = "path_documentation"
     BANDIT_B105_TOKEN_LITERAL = "bandit_b105_token_literal"
     BANDIT_B404_TOOL_SUBPROCESS = "bandit_b404_tool_subprocess"
     BANDIT_B603_TOOL_SUBPROCESS = "bandit_b603_tool_subprocess"
@@ -48,6 +50,7 @@ class SecurityFindingClassifier:
         ClassificationReason.PATH_RUNTIME.value,
         ClassificationReason.PATH_TOOLING.value,
         ClassificationReason.PATH_TEST.value,
+        ClassificationReason.PATH_DOCUMENTATION.value,
         ClassificationReason.BANDIT_B105_TOKEN_LITERAL.value,
         ClassificationReason.BANDIT_B404_TOOL_SUBPROCESS.value,
         ClassificationReason.BANDIT_B603_TOOL_SUBPROCESS.value,
@@ -145,6 +148,19 @@ class SecurityFindingClassifier:
                 }
             )
 
+        if self._is_documentation_path(path):
+            return finding.model_copy(
+                update={
+                    "security_class": "false_positive",
+                    "security_context": "unknown",
+                    "security_impact": "none",
+                    "score_weight": 0.0,
+                    "classification_reason": ClassificationReason.PATH_DOCUMENTATION.value,
+                    "classification_rule_id": ClassificationReason.PATH_DOCUMENTATION.value,
+                    "classification_detail": None,
+                }
+            )
+
         if self._is_tooling_path(path):
             if finding.tool == "bandit" and rule_id in {"B404", "B603"}:
                 escalation_reason = self._escalation_reason(raw_text, rule_id)
@@ -225,6 +241,10 @@ class SecurityFindingClassifier:
     @staticmethod
     def _is_tooling_path(path: str) -> bool:
         return any(path.startswith(prefix) for prefix in _TOOLING_PREFIXES)
+
+    @staticmethod
+    def _is_documentation_path(path: str) -> bool:
+        return path in {"readme", "readme.md"} or any(path.startswith(prefix) for prefix in _DOCUMENTATION_PREFIXES)
 
     @staticmethod
     def _extract_b105_literal(message: str) -> str | None:

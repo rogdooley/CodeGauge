@@ -112,7 +112,34 @@ def test_secrets_heuristic_parser_returns_scalar_metrics_metadata() -> None:
 def test_git_history_parser_maps_to_historical_category() -> None:
     parser = GitHistorySecretsParser()
     stdout = json.dumps(
-        {"findings": [{"type": "historical_secret_exposure", "file": "src/app.py", "message": "found", "commit": "abc"}]}
+        {
+            "findings": [
+                {
+                    "type": "historical_secret_exposure",
+                    "file": "src/app.py",
+                    "message": "found AKIA1234567890ABCDEF",
+                    "commit": "abc",
+                }
+            ]
+        }
     )
     findings = parser.parse(stdout, "", Path.cwd())
     assert findings[0].rule_id == "historical_secret_exposure"
+
+
+def test_git_history_parser_ignores_generic_secret_words_without_credential_value() -> None:
+    parser = GitHistorySecretsParser()
+    stdout = json.dumps(
+        {
+            "findings": [
+                {
+                    "type": "historical_secret_exposure",
+                    "file": "src/app.py",
+                    "message": "found token/password/secret marker",
+                    "line": "token password secret",
+                }
+            ]
+        }
+    )
+    findings = parser.parse(stdout, "", Path.cwd())
+    assert findings == []

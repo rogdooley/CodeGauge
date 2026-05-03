@@ -60,3 +60,59 @@ def test_heuristic_scanner_marks_pem_marker_as_probable(tmp_path: Path) -> None:
     assert pem["signals"]["pem_markers"] is True
     assert "pem_markers" in pem["signal_labels"]
     assert payload["scalar_metrics"]["secrets_candidates_seen"] >= 1
+
+
+def test_heuristic_scanner_does_not_flag_identifier_name_alone(tmp_path: Path) -> None:
+    project = tmp_path / "repo5"
+    project.mkdir()
+    (project / "auth.py").write_text('password = "short"\naccess_token = "token"\n', encoding="utf-8")
+
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_heuristic_scanner_suppresses_excluded_identifier_names(tmp_path: Path) -> None:
+    project = tmp_path / "repo6"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        'password_hash = "a3f5d7c9e1b2a4d6f8c0e2a4b6d8f0a2"\nmin_password_length = "64"\n',
+        encoding="utf-8",
+    )
+
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_heuristic_scanner_ignores_placeholder_values_in_example_env(tmp_path: Path) -> None:
+    project = tmp_path / "repo7"
+    project.mkdir()
+    (project / ".env.example").write_text(
+        'API_KEY="CHANGE_ME"\nCLIENT_SECRET="placeholder"\nACCESS_TOKEN="<generate>"\n',
+        encoding="utf-8",
+    )
+
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_heuristic_scanner_flags_realistic_secret_in_example_env(tmp_path: Path) -> None:
+    project = tmp_path / "repo9"
+    project.mkdir()
+    (project / ".env.example").write_text('API_KEY="AKIA1234567890ABCDEF"\n', encoding="utf-8")
+
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "probable_secret_exposure" for item in payload["findings"])
+
+
+def test_heuristic_scanner_ignores_test_vendor_dist_and_minified_files(tmp_path: Path) -> None:
+    project = tmp_path / "repo8"
+    (project / "tests").mkdir(parents=True)
+    (project / "vendor").mkdir(parents=True)
+    (project / "dist").mkdir(parents=True)
+    (project / "tests" / "test_auth.py").write_text('api_key = "AKIA1234567890ABCDEF"\n', encoding="utf-8")
+    (project / "vendor" / "lib.js").write_text('api_key = "AKIA1234567890ABCDEF"\n', encoding="utf-8")
+    (project / "dist" / "bundle.js").write_text('api_key = "AKIA1234567890ABCDEF"\n', encoding="utf-8")
+    (project / "app.min.js").write_text('api_key = "AKIA1234567890ABCDEF"\n', encoding="utf-8")
+
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []

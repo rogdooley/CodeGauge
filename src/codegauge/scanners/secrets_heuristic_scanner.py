@@ -27,21 +27,27 @@ _CERT_LINE_RE = re.compile(r"-----BEGIN CERTIFICATE-----")
 _ASSIGNMENT_RE = re.compile(r"(?i)\b([a-z_][a-z0-9_]*)\b\s*[:=]\s*['\"]([^'\"\n#]+)['\"]")
 _TOKEN_ASSIGNMENT_RE = re.compile(r"(?i)\b([a-z_][a-z0-9_]*)\b\s*[:=]\s*([A-Za-z0-9_\-./+=]{12,})")
 
-_SUSPICIOUS_VARIABLE_PARTS = (
-    "password",
-    "passwd",
-    "secret",
-    "apikey",
+_SUSPICIOUS_VARIABLE_NAMES = {
     "api_key",
-    "accesskey",
-    "access_key",
-    "clientsecret",
-    "client_secret",
-    "privatekey",
+    "secret_key",
     "private_key",
-    "bearer",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "password",
+}
+
+_EXCLUDED_VARIABLE_NAMES = {
+    "password_hash",
+    "verify_password",
+    "passwordinput",
+    "credential_id",
     "credential",
-)
+    "allowcredentials",
+    "excludecredentials",
+    "secret_length",
+    "min_password_length",
+}
 
 _ALLOWLIST_VARIABLE_NAMES = {
     "csrf_token",
@@ -81,6 +87,12 @@ _CREDENTIAL_FORMATS = (
     re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+\b"),
 )
+_HEX_LONG_RE = re.compile(r"^[A-Fa-f0-9]{32,}$")
+_BASE64_LONG_RE = re.compile(r"^[A-Za-z0-9+/=]{32,}$")
+_STRIPE_TOKEN_RE = re.compile(r"\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b")
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+\b")
+_PLACEHOLDER_VALUES = {"", '""', "change_me", "replace_me", "example", "placeholder", "<generate>"}
+_IGNORED_FILE_PARTS = {"vendor", "dist"}
 
 
 def _normalize_name(name: str) -> str:
@@ -105,7 +117,9 @@ def _variable_signal(name: str) -> bool:
     normalized = _normalize_name(name)
     if normalized in _ALLOWLIST_VARIABLE_NAMES:
         return False
-    return any(part in normalized for part in _SUSPICIOUS_VARIABLE_PARTS)
+    if normalized in _EXCLUDED_VARIABLE_NAMES:
+        return False
+    return normalized in _SUSPICIOUS_VARIABLE_NAMES
 
 
 def _prefix_signal(value: str) -> bool:
@@ -114,6 +128,41 @@ def _prefix_signal(value: str) -> bool:
 
 def _credential_format_signal(value: str) -> bool:
     return any(pattern.search(value) for pattern in _CREDENTIAL_FORMATS)
+
+
+def _value_signal(value: str) -> bool:
+    value = value.strip()
+    entropy_high = _entropy(value) >= 3.6 and len(value) >= 20
+    return bool(
+        entropy_high
+        or _JWT_RE.search(value)
+        or _KEY_LINE_RE.search(value)
+        or re.search(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b", value)
+        or re.search(r"\b(?:ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b", value)
+        or _STRIPE_TOKEN_RE.search(value)
+        or _HEX_LONG_RE.fullmatch(value)
+        or _BASE64_LONG_RE.fullmatch(value)
+    )
+
+
+def _is_placeholder(value: str) -> bool:
+    normalized = value.strip().strip("'\"").lower()
+    return normalized in _PLACEHOLDER_VALUES
+
+
+def _is_example_file(rel_lower: str) -> bool:
+    name = Path(rel_lower).name
+    return name == ".env.example" or ".example" in name or "sample" in name
+
+
+def _is_ignored_file(rel: str) -> bool:
+    rel_lower = rel.lower()
+    parts = Path(rel_lower).parts
+    if rel_lower.startswith("tests/"):
+        return True
+    if any(part in _IGNORED_FILE_PARTS for part in parts):
+        return True
+    return rel_lower.endswith(".min.js")
 
 
 def _signals(variable_name: str, value: str) -> dict[str, object]:
@@ -158,10 +207,13 @@ def _signal_labels(signal_map: dict[str, object]) -> list[str]:
 def _confidence_from_signals(signal_map: dict[str, object]) -> tuple[str, int]:
     if bool(signal_map.get("allowlisted_variable")):
         return "noise", 0
-    has_anchor_signal = bool(signal_map.get("variable_name")) or bool(signal_map.get("known_prefixes")) or bool(
-        signal_map.get("credential_format")
-    ) or bool(signal_map.get("pem_markers"))
-    if not has_anchor_signal:
+    has_suspicious_identifier = bool(signal_map.get("variable_name"))
+    has_suspicious_value = bool(signal_map.get("credential_format")) or bool(signal_map.get("known_prefixes")) or bool(
+        signal_map.get("pem_markers")
+    ) or bool(signal_map.get("entropy_signal"))
+    if not has_suspicious_identifier:
+        return "noise", 0
+    if not has_suspicious_value:
         return "noise", 0
     score = 0
     if bool(signal_map.get("variable_name")):
@@ -215,7 +267,9 @@ class SecretsHeuristicScanner(Scanner):
         for file_path in selected:
             rel = file_path.resolve().relative_to(project_path.resolve()).as_posix()
             rel_lower = rel.lower()
-            if any(hint in rel_lower for hint in _SENSITIVE_PATH_HINTS):
+            if _is_ignored_file(rel):
+                continue
+            if any(hint in rel_lower for hint in _SENSITIVE_PATH_HINTS) and not _is_example_file(rel_lower):
                 telemetry["candidates_seen"] += 1
                 telemetry["weak"] += 1
                 findings.append(
@@ -306,6 +360,12 @@ class SecretsHeuristicScanner(Scanner):
                         telemetry["candidates_seen"] += 1
                         variable_name = match.group(1)
                         literal_value = match.group(2)
+                        if _is_example_file(rel_lower) and _is_placeholder(literal_value):
+                            telemetry["noise_dropped"] += 1
+                            continue
+                        if not _value_signal(literal_value):
+                            telemetry["noise_dropped"] += 1
+                            continue
                         signal_map = _signals(variable_name, literal_value)
                         if bool(signal_map.get("allowlisted_variable")):
                             telemetry["allowlisted"] += 1

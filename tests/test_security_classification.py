@@ -192,3 +192,12 @@ def test_baseline_suppression_behavior_still_works_with_classification() -> None
     )
     applied = baseline_service.apply([result], baseline)
     assert len(applied.filtered_results[0].findings) == 0
+
+
+def test_documentation_paths_are_zero_weighted() -> None:
+    classifier = SecurityFindingClassifier()
+    finding = _security_finding(rule_id="B602", file_path="README.md", message="potential command injection")
+    classified = classifier.classify_finding(finding)
+    assert classified.score_weight == 0.0
+    assert classified.security_class == "false_positive"
+    assert classified.classification_reason == ClassificationReason.PATH_DOCUMENTATION.value
