@@ -40,6 +40,7 @@ class StaticSiteBuilder:
     def build(self) -> dict[str, Any]:
         self.report_root.mkdir(parents=True, exist_ok=True)
         (self.report_root / "assets").mkdir(parents=True, exist_ok=True)
+        self._write_shared_assets()
         projects = self.store.list_projects()
         project_rows: list[dict[str, Any]] = []
 
@@ -81,9 +82,10 @@ class StaticSiteBuilder:
         return {"project_count": len(project_rows), "output_dir": str(self.report_root)}
 
     def _write_index(self, project_rows: list[dict[str, Any]], summary: dict[str, Any]) -> None:
+        index_path = self.portal_index
         template = self.environment.get_template("index.html.j2")
-        html = template.render(projects=project_rows, summary=summary)
-        self._write_html(self.portal_index, html)
+        html = template.render(projects=project_rows, summary=summary, assets_prefix=self._assets_prefix(index_path))
+        self._write_html(index_path, html)
 
     def _write_project_page(self, project_name: str, history: list[dict[str, Any]]) -> None:
         latest = history[-1]
@@ -133,12 +135,14 @@ class StaticSiteBuilder:
             self._write_run_pages(project_name=project_name, item=item, previous=prior)
 
         template = self.environment.get_template("project.html.j2")
+        project_index = project_dir / "index.html"
         html = template.render(
             project=project_name,
             latest=latest,
             runs=runs,
+            assets_prefix=self._assets_prefix(project_index),
         )
-        self._write_html(project_dir / "index.html", html)
+        self._write_html(project_index, html)
 
         latest_link = project_dir / "latest"
         latest_run = Path(latest["scan_dir"])
@@ -201,6 +205,8 @@ class StaticSiteBuilder:
 
         report_template = self.environment.get_template("run_report.html.j2")
         details_template = self.environment.get_template("run_details.html.j2")
+        run_report_path = run_dir / "report.html"
+        run_details_path = run_dir / "details.html"
         policy_payload = item.get("policy", {})
         baseline_payload = score.get("baseline", {}) if isinstance(score.get("baseline"), dict) else {}
         security_total = sum(len(rows) for rows in security_groups.values())
@@ -218,6 +224,7 @@ class StaticSiteBuilder:
             security_count=len(action_plan.get("security_concerns", [])),
             architectural_count=len(action_plan.get("architectural_concerns", [])),
             links=links,
+            assets_prefix=self._assets_prefix(run_report_path),
         )
         details_html = details_template.render(
             project=project_name,
@@ -240,9 +247,17 @@ class StaticSiteBuilder:
             trend={"current_score": current_score, "previous_score": previous_score, "delta": delta},
             runtime=runtime,
             links=links,
+            assets_prefix=self._assets_prefix(run_details_path),
         )
-        self._write_html(run_dir / "report.html", report_html)
-        self._write_html(run_dir / "details.html", details_html)
+        self._write_html(run_report_path, report_html)
+        self._write_html(run_details_path, details_html)
+
+    def _write_shared_assets(self) -> None:
+        templates_dir = Path(__file__).with_name("templates")
+        css_template = templates_dir / "assets" / "report.css"
+        js_template = templates_dir / "assets" / "theme.js"
+        self._write_html(self.report_root / "assets" / "report.css", css_template.read_text(encoding="utf-8"))
+        self._write_html(self.report_root / "assets" / "theme.js", js_template.read_text(encoding="utf-8"))
 
     @staticmethod
     def _severity_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
@@ -367,6 +382,9 @@ class StaticSiteBuilder:
         import os
 
         return os.path.relpath(to_file, from_file.parent).replace(os.sep, "/")
+
+    def _assets_prefix(self, from_file: Path) -> str:
+        return self._relative_link(from_file, self.report_root / "assets")
 
     @staticmethod
     def _sort_projects(project_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

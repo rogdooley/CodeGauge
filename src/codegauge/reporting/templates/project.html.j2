@@ -3,19 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <title>CodeGauge Project - {{ project }}</title>
-    <style>
-      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
-      th, td { border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }
-      th { background: #f3f4f6; }
-      .status-fail { color: #b91c1c; font-weight: 600; }
-      .status-warn { color: #92400e; font-weight: 600; }
-      .status-pass { color: #166534; font-weight: 600; }
-      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-    </style>
+    <link rel="stylesheet" href="{{ assets_prefix }}/report.css" />
+    <script defer src="{{ assets_prefix }}/theme.js"></script>
   </head>
   <body>
-    <p><a href="../../index.html">Back to portal</a></p>
+    <div class="header-row">
+      <p><a href="../../index.html">Back to portal</a></p>
+      <div class="actions">
+        <button class="btn" type="button" data-theme-toggle>Theme: Dark</button>
+      </div>
+    </div>
     <h1>Project: {{ project }}</h1>
 
     {% if runs %}

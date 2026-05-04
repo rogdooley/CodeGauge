@@ -3,17 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <title>CodeGauge Action Plan - {{ project }}</title>
-    <style>
-      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 2rem; color: #1f2937; }
-      h1, h2 { margin-bottom: 0.5rem; }
-      .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; }
-      .meta { color: #4b5563; font-size: 0.92rem; }
-      .row { margin: 0.2rem 0; }
-      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-    </style>
+    <link rel="stylesheet" href="{{ assets_prefix }}/report.css" />
+    <script defer src="{{ assets_prefix }}/theme.js"></script>
   </head>
   <body>
-    <h1>Action Plan: {{ project }}</h1>
+    <div class="header-row">
+      <h1>Action Plan: {{ project }}</h1>
+      <div class="actions">
+        <button class="btn" type="button" data-theme-toggle>Theme: Dark</button>
+      </div>
+    </div>
 
     <h2>Executive Summary</h2>
     <p>{{ action_plan.executive_summary }}</p>

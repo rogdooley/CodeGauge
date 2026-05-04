@@ -114,6 +114,8 @@ def test_build_site_generates_portal_and_project_indexes(tmp_path: Path) -> None
     index = (report_root / "index.html").read_text()
     alpha = (report_root / "projects" / "alpha" / "index.html").read_text()
     beta = (report_root / "projects" / "beta" / "index.html").read_text()
+    shared_css = report_root / "assets" / "report.css"
+    shared_js = report_root / "assets" / "theme.js"
 
     assert "CodeGauge Report Portal" in index
     assert "Project Count" in index
@@ -131,6 +133,10 @@ def test_build_site_generates_portal_and_project_indexes(tmp_path: Path) -> None
     assert "action-plan.json" in alpha
     assert "Project: beta" in beta
     assert (report_root / "projects" / "alpha" / "latest").exists()
+    assert shared_css.exists()
+    assert shared_js.exists()
+    assert "assets/report.css" in index
+    assert "assets/theme.js" in index
 
 
 def test_scan_generates_portal_tree_with_runs_and_latest(tmp_path: Path) -> None:

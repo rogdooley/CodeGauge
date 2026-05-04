@@ -3,40 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <title>CodeGauge Report - {{ project }}</title>
-    <style>
-      body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 1.25rem; color: #1f2937; background: #f8fafc; }
-      .muted { color: #4b5563; }
-      .mono { font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-      .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 0.9rem; margin-bottom: 0.9rem; background: #fff; }
-      .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
-      .title { margin: 0; font-size: 1.5rem; }
-      .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-      .btn { border: 1px solid #cbd5e1; border-radius: 9999px; padding: 0.3rem 0.7rem; text-decoration: none; color: #0f172a; background: #fff; font-size: 0.9rem; }
-      .btn.primary { background: #0f172a; color: #fff; border-color: #0f172a; }
-      .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; }
-      .score { border: 1px solid #d1d5db; border-radius: 8px; padding: 0.6rem; background: #fff; }
-      .score .label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; }
-      .score .value { font-size: 1.15rem; font-weight: 700; }
-      .policy-pass { border-color: #86efac; background: #f0fdf4; }
-      .policy-warn { border-color: #fcd34d; background: #fffbeb; }
-      .policy-fail { border-color: #fca5a5; background: #fef2f2; }
-      .grade-A { color: #166534; }
-      .grade-B { color: #1d4ed8; }
-      .grade-C { color: #92400e; }
-      .grade-D, .grade-F { color: #b91c1c; }
-      .delta-up { color: #166534; }
-      .delta-down { color: #b91c1c; }
-      .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; }
-      ul { margin: 0.4rem 0 0 1rem; padding: 0; }
-      li { margin-bottom: 0.25rem; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border: 1px solid #e2e8f0; padding: 0.4rem; text-align: left; vertical-align: top; }
-      th { background: #f8fafc; }
-      @media (max-width: 900px) {
-        .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .two-col { grid-template-columns: 1fr; }
-      }
-    </style>
+    <link rel="stylesheet" href="{{ assets_prefix }}/report.css" />
+    <script defer src="{{ assets_prefix }}/theme.js"></script>
   </head>
   <body>
     <div class="card">
@@ -52,6 +20,7 @@
           <a class="btn" href="{{ links.raw }}">Raw</a>
           <a class="btn" href="{{ links.history }}">History</a>
           <a class="btn" href="{{ links.latest }}">Latest</a>
+          <button class="btn" type="button" data-theme-toggle>Theme: Dark</button>
         </div>
       </div>
     </div>
