@@ -116,3 +116,57 @@ def test_heuristic_scanner_ignores_test_vendor_dist_and_minified_files(tmp_path:
 
     payload = _run(SecretsHeuristicScanner(), project)
     assert payload["findings"] == []
+
+
+def test_python_config_reads_are_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo10"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "api_key = settings.meili_api_key\napi_key = os.getenv('MEILI_API_KEY')\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_python_default_literal_fallback_is_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo11"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "import os\napi_key = os.getenv('MEILI_API_KEY', 'AKIA1234567890ABCDEF')\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["message"].startswith("Potential hardcoded secret default fallback") for item in payload["findings"])
+
+
+def test_python_sink_logging_and_response_leaks_are_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo12"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "import json\n\n"
+        "def emit(token: str):\n"
+        "    logger.info(token)\n"
+        "    print(token)\n"
+        "    json.dump({'token': token}, None)\n"
+        "    return {'api_key': token}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any("sink call" in item["message"] for item in payload["findings"])
+    assert any("response leak" in item["message"] for item in payload["findings"])
+
+
+def test_python_parameter_and_attribute_names_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo13"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "def foo(api_key: str):\n"
+        "    self.api_key = api_key\n"
+        "    password_hash = api_key\n"
+        "    credential_id = 'abc-123'\n"
+        "    credential_blob = b'1234'\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []

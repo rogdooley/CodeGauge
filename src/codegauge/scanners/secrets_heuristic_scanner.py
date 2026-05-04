@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import math
 import re
@@ -29,7 +30,9 @@ _TOKEN_ASSIGNMENT_RE = re.compile(r"(?i)\b([a-z_][a-z0-9_]*)\b\s*[:=]\s*([A-Za-z
 
 _SUSPICIOUS_VARIABLE_NAMES = {
     "api_key",
+    "secret",
     "secret_key",
+    "token",
     "private_key",
     "client_secret",
     "access_token",
@@ -45,6 +48,7 @@ _EXCLUDED_VARIABLE_NAMES = {
     "credential",
     "allowcredentials",
     "excludecredentials",
+    "credential_blob",
     "secret_length",
     "min_password_length",
 }
@@ -183,6 +187,128 @@ def _signals(variable_name: str, value: str) -> dict[str, object]:
     }
 
 
+def _constant_secret_text(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _extract_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _call_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        base = _extract_name(func.value)
+        return f"{base}.{func.attr}" if base else func.attr
+    return ""
+
+
+def _contains_suspicious_name(node: ast.AST) -> str | None:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and _variable_signal(child.id):
+            return child.id
+    return None
+
+
+def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return findings
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if not isinstance(target, ast.Name) or not _variable_signal(target.id):
+                    continue
+                literal = _constant_secret_text(node.value)
+                if literal is not None:
+                    if _is_example_file(rel_lower) and _is_placeholder(literal):
+                        continue
+                    if _value_signal(literal):
+                        signal_map = _signals(target.id, literal)
+                        findings.append(
+                            {
+                                "type": "probable_secret_exposure",
+                                "file": rel,
+                                "line": node.lineno,
+                                "message": f"Potential hardcoded secret literal in variable '{target.id}'.",
+                                "confidence": "probable",
+                                "score": 4,
+                                "signals": signal_map,
+                                "signal_labels": _signal_labels(signal_map),
+                                "variable_name": target.id,
+                                "secret_value": literal,
+                            }
+                        )
+                    continue
+                if isinstance(node.value, ast.Call) and _call_name(node.value) == "os.getenv" and len(node.value.args) >= 2:
+                    default_value = _constant_secret_text(node.value.args[1])
+                    if default_value is None:
+                        continue
+                    if _is_example_file(rel_lower) and _is_placeholder(default_value):
+                        continue
+                    if _value_signal(default_value):
+                        signal_map = _signals(target.id, default_value)
+                        findings.append(
+                            {
+                                "type": "probable_secret_exposure",
+                                "file": rel,
+                                "line": node.lineno,
+                                "message": f"Potential hardcoded secret default fallback in variable '{target.id}'.",
+                                "confidence": "probable",
+                                "score": 4,
+                                "signals": signal_map,
+                                "signal_labels": _signal_labels(signal_map),
+                                "variable_name": target.id,
+                                "secret_value": default_value,
+                            }
+                        )
+        if isinstance(node, ast.Call):
+            call_name = _call_name(node)
+            sink_match = call_name == "print" or call_name.startswith("logger.") or call_name in {"json.dump", "json.dumps"}
+            if sink_match:
+                leaked_name = _contains_suspicious_name(node)
+                if leaked_name is not None:
+                    findings.append(
+                        {
+                            "type": "probable_secret_exposure",
+                            "file": rel,
+                            "line": node.lineno,
+                            "message": f"Potential secret leak via sink call using '{leaked_name}'.",
+                            "confidence": "probable",
+                            "score": 4,
+                            "signals": _signals(leaked_name, leaked_name),
+                            "signal_labels": ["variable_name", "sink_exposure"],
+                            "variable_name": leaked_name,
+                        }
+                    )
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
+            leaked_name = _contains_suspicious_name(node.value)
+            if leaked_name is not None:
+                findings.append(
+                    {
+                        "type": "probable_secret_exposure",
+                        "file": rel,
+                        "line": node.lineno,
+                        "message": f"Potential secret response leak containing '{leaked_name}'.",
+                        "confidence": "probable",
+                        "score": 4,
+                        "signals": _signals(leaked_name, leaked_name),
+                        "signal_labels": ["variable_name", "response_exposure"],
+                        "variable_name": leaked_name,
+                    }
+                )
+    return findings
+
+
 def _signal_labels(signal_map: dict[str, object]) -> list[str]:
     labels: list[str] = []
     if bool(signal_map.get("variable_name")):
@@ -298,6 +424,22 @@ class SecretsHeuristicScanner(Scanner):
             try:
                 text = file_path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
+                continue
+            if rel_lower.endswith(".py"):
+                for line in text.splitlines():
+                    match = _ASSIGNMENT_RE.search(line) or _TOKEN_ASSIGNMENT_RE.search(line)
+                    if match is None:
+                        continue
+                    telemetry["candidates_seen"] += 1
+                    if _normalize_name(match.group(1)) in _ALLOWLIST_VARIABLE_NAMES:
+                        telemetry["allowlisted"] += 1
+                    else:
+                        telemetry["noise_dropped"] += 1
+                python_findings = _python_findings(rel, rel_lower, text)
+                for finding in python_findings:
+                    telemetry["candidates_seen"] += 1
+                    telemetry["probable"] += 1
+                    findings.append(finding)
                 continue
             for idx, line in enumerate(text.splitlines(), start=1):
                 if _KEY_LINE_RE.search(line):
