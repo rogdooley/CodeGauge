@@ -170,3 +170,83 @@ def test_python_parameter_and_attribute_names_not_flagged(tmp_path: Path) -> Non
     )
     payload = _run(SecretsHeuristicScanner(), project)
     assert payload["findings"] == []
+
+
+def test_url_bearer_rule_public_token_redirect_medium(tmp_path: Path) -> None:
+    project = tmp_path / "repo14"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "import secrets\n"
+        "def handler():\n"
+        "    public_token = secrets.token_urlsafe(32)\n"
+        "    return RedirectResponse(url=f\"/x?public_token={public_token}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(item for item in payload["findings"] if item["type"] == "intentional_bearer_issuance_url_transport")
+    assert finding["severity"] == "medium"
+    assert finding["subtype"] == "public_access_token"
+
+
+def test_url_bearer_rule_invite_redirect_medium(tmp_path: Path) -> None:
+    project = tmp_path / "repo15"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "def create_invite_code():\n"
+        "    return 'abc'\n"
+        "def handler():\n"
+        "    invite_code = create_invite_code()\n"
+        "    return redirect('/ok?invite_code=' + invite_code)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(
+        item["type"] == "intentional_bearer_issuance_url_transport" and item["subtype"] == "invite_capability_code"
+        for item in payload["findings"]
+    )
+
+
+def test_url_bearer_rule_reset_redirect_medium_and_high(tmp_path: Path) -> None:
+    project = tmp_path / "repo16"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "def generate_reset_token():\n"
+        "    return 'abc'\n"
+        "def a():\n"
+        "    reset_token_a = generate_reset_token()\n"
+        "    return RedirectResponse(url=f\"/r?reset_token={reset_token_a}\")\n"
+        "def b():\n"
+        "    reset_token_b = generate_reset_token()  # multi-use 30 day ttl full url logging telemetry\n"
+        "    return RedirectResponse(url=f\"/r?reset_token={reset_token_b}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    severities = [
+        item["severity"] for item in payload["findings"] if item["type"] == "intentional_bearer_issuance_url_transport"
+    ]
+    assert "medium" in severities
+    assert "high" in severities
+
+
+def test_url_bearer_rule_non_findings_for_flash_csrf_cursor_path_and_docs(tmp_path: Path) -> None:
+    project = tmp_path / "repo17"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "def issue_token():\n"
+        "    return 'abc'\n"
+        "def ok():\n"
+        "    flash_id = issue_token()\n"
+        "    csrf_token = issue_token()\n"
+        "    cursor = issue_token()\n"
+        "    a = RedirectResponse(url=f\"/x?flash_id={flash_id}\")\n"
+        "    b = RedirectResponse(url=f\"/x?csrf_token={csrf_token}\")\n"
+        "    c = RedirectResponse(url=f\"/x?cursor={cursor}\")\n"
+        "    return {'url': f'/s/{flash_id}'}\n",
+        encoding="utf-8",
+    )
+    (project / "README.md").write_text(
+        "public_token = issue_token()\nreturn RedirectResponse(url=f\"/x?public_token={public_token}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert not any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])

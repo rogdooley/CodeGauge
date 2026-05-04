@@ -143,3 +143,30 @@ def test_git_history_parser_ignores_generic_secret_words_without_credential_valu
     )
     findings = parser.parse(stdout, "", Path.cwd())
     assert findings == []
+
+
+def test_secrets_heuristic_parser_maps_url_bearer_transport_rule() -> None:
+    parser = SecretsHeuristicParser()
+    stdout = json.dumps(
+        {
+            "findings": [
+                {
+                    "type": "intentional_bearer_issuance_url_transport",
+                    "file": "src/app.py",
+                    "line": 10,
+                    "message": "Bearer material in URL query",
+                    "confidence": "probable",
+                    "severity": "high",
+                    "subtype": "invite_capability_code",
+                    "token_variable": "invite_code",
+                    "issuer_symbol": "create_invite",
+                    "transport_kind": "query",
+                    "severity_reason": "high_risk_token_characteristics_or_url_observability",
+                }
+            ]
+        }
+    )
+    findings = parser.parse(stdout, "", Path.cwd())
+    assert findings[0].rule_id == "intentional_bearer_issuance_url_transport"
+    assert findings[0].severity.value == "high"
+    assert findings[0].raw_payload["subtype"] == "invite_capability_code"

@@ -34,13 +34,30 @@ class SecretsHeuristicParser(ScannerParser):
             severity = Severity.medium
             if finding_type == "probable_secret_exposure":
                 severity = Severity.high
+            elif finding_type == "intentional_bearer_issuance_url_transport":
+                severity_value = str(entry.get("severity") or "medium").lower()
+                if severity_value == "high":
+                    severity = Severity.high
+                elif severity_value == "low":
+                    severity = Severity.low
+                else:
+                    severity = Severity.medium
             elif confidence == "weak" or finding_type == "weak_secret_management":
                 severity = Severity.medium
             elif finding_type == "sensitive_path":
                 finding_type = "weak_secret_management"
                 severity = Severity.low
-            if finding_type not in {"probable_secret_exposure", "weak_secret_management"}:
+            if finding_type not in {
+                "probable_secret_exposure",
+                "weak_secret_management",
+                "intentional_bearer_issuance_url_transport",
+            }:
                 finding_type = "weak_secret_management"
+            confidence_score = 0.35
+            if confidence == "probable":
+                confidence_score = 0.75
+            elif confidence == "high":
+                confidence_score = 0.9
             findings.append(
                 _secret_finding(
                     tool="secrets_heuristic",
@@ -51,7 +68,7 @@ class SecretsHeuristicParser(ScannerParser):
                     line=line,
                     severity=severity,
                     tags=["heuristic", "secrets_profile", confidence],
-                    confidence=(0.75 if confidence == "probable" else 0.35),
+                    confidence=confidence_score,
                     raw_payload={**entry, "confidence": confidence, "verified": False, "secret_real": False},
                 )
             )

@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "rule_id": "bearer_token_in_url_path",
+  "version": "0.1.0",
+  "status": "planned",
+  "implemented": false,
+  "category": "security",
+  "default_severity": "low",
+  "severity_range": [
+    "low",
+    "medium"
+  ],
+  "purpose": "Detect bearer-equivalent or capability-equivalent material embedded in canonical URL path segments such as /s/{token} or /share/{token}.",
+  "subtypes": [
+    "public_access_token",
+    "invite_capability_code",
+    "reset_token",
+    "api_key",
+    "session_token",
+    "unknown_capability_token"
+  ],
+  "severity_escalation_conditions": [
+    "token_or_code_long_lived",
+    "token_or_code_multi_use",
+    "token_or_code_non_revocable",
+    "token_or_code_grants_privileged_capability"
+  ],
+  "notes": [
+    "Placeholder spec only. Detector/classifier implementation is intentionally deferred.",
+    "Query-string transport is covered by intentional_bearer_issuance_url_transport."
+  ]
+}

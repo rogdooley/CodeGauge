@@ -97,6 +97,33 @@ _STRIPE_TOKEN_RE = re.compile(r"\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+\b")
 _PLACEHOLDER_VALUES = {"", '""', "change_me", "replace_me", "example", "placeholder", "<generate>"}
 _IGNORED_FILE_PARTS = {"vendor", "dist"}
+_URL_CAPABILITY_RULE_ID = "intentional_bearer_issuance_url_transport"
+_URL_CAPABILITY_MESSAGE = (
+    "Bearer-equivalent capability material is transported in URL query parameters after issuance, increasing exposure via "
+    "logs, browser history, referrer propagation, and telemetry capture."
+)
+_QUERY_PARAM_HINTS = ("token", "public_token", "invite", "invite_code", "code", "reset_token", "api_key", "key", "session")
+_NON_FINDING_PARAM_HINTS = ("csrf_token", "csrftoken", "xsrf", "cursor", "page_token", "offset_token", "flash", "flash_id", "nonce_id")
+_CAPABILITY_SUBTYPE_BY_NAME = {
+    "public_token": "public_access_token",
+    "invite_code": "invite_capability_code",
+    "invite_token": "invite_capability_code",
+    "reset_token": "reset_token",
+    "api_key": "api_key",
+    "session_token": "session_token",
+    "token": "unknown_capability_token",
+}
+_NON_FINDING_PARAM_NORMALIZED = {
+    "csrf_token",
+    "csrftoken",
+    "xsrf",
+    "cursor",
+    "page_token",
+    "offset_token",
+    "flash",
+    "flash_id",
+    "nonce_id",
+}
 
 
 def _normalize_name(name: str) -> str:
@@ -169,6 +196,57 @@ def _is_ignored_file(rel: str) -> bool:
     return rel_lower.endswith(".min.js")
 
 
+def _is_doc_or_fixture_context(rel: str) -> bool:
+    rel_lower = rel.lower()
+    parts = Path(rel_lower).parts
+    if rel_lower.startswith("readme") or rel_lower.endswith(".md"):
+        return True
+    if "documentation" in parts or "designdocuments" in parts or "docs" in parts:
+        return True
+    if "fixture" in rel_lower or "mock" in rel_lower:
+        return True
+    if rel_lower.endswith((".yaml", ".yml")) and "example" in rel_lower:
+        return True
+    return False
+
+
+def _severity_from_entry(entry_text: str) -> tuple[str, str]:
+    text = entry_text.lower()
+    high_terms = ("ttl>7d", "ttl > 7", "30 day", "unlimited use", "multi-use", "non-revocable", "admin invite", "privileged", "telemetry", "full url logging")
+    low_terms = ("single use", "ttl<=24h", "ttl <= 24h", "revocable", "not logged", "no telemetry")
+    if any(term in text for term in high_terms):
+        return "high", "high_risk_token_characteristics_or_url_observability"
+    if all(term in text for term in low_terms):
+        return "low", "single_use_short_ttl_revocable_non_observable"
+    return "medium", "default_risk_profile"
+
+
+def _query_keys_from_text(text: str) -> list[str]:
+    lowered = text.lower()
+    keys = re.findall(r"[?&]([a-zA-Z_][a-zA-Z0-9_]*)=", lowered)
+    if keys:
+        return keys
+    return re.findall(r"['\"]([a-zA-Z_][a-zA-Z0-9_]*)['\"]\s*:", lowered)
+
+
+def _query_key_from_text(text: str) -> str | None:
+    keys = _query_keys_from_text(text)
+    for key in keys:
+        if key in _QUERY_PARAM_HINTS:
+            return key
+    return None
+
+
+def _is_non_finding_param(name: str) -> bool:
+    normalized = _normalize_name(name)
+    return normalized in _NON_FINDING_PARAM_NORMALIZED
+
+
+def _subtype_for_name(name: str) -> str:
+    normalized = _normalize_name(name)
+    return _CAPABILITY_SUBTYPE_BY_NAME.get(normalized, "unknown_capability_token")
+
+
 def _signals(variable_name: str, value: str) -> dict[str, object]:
     normalized_name = _normalize_name(variable_name)
     allowlisted = normalized_name in _ALLOWLIST_VARIABLE_NAMES
@@ -216,12 +294,126 @@ def _contains_suspicious_name(node: ast.AST) -> str | None:
     return None
 
 
+def _call_symbol(node: ast.AST) -> str:
+    if isinstance(node, ast.Call):
+        return _call_name(node)
+    return ""
+
+
+def _is_capability_issuer_call(node: ast.AST) -> bool:
+    symbol = _call_symbol(node).lower()
+    if symbol in {"secrets.token_urlsafe", "secrets.token_hex", "uuid.uuid4"}:
+        return True
+    return bool(
+        re.search(r"(create|generate|issue)_[a-z0-9_]*(token|invite|share|public_link|api_key|session)", symbol)
+        or re.search(r"(token|invite|share|public_link|api_key|session).*?(create|generate|issue)", symbol)
+    )
+
+
+def _extract_name_refs(node: ast.AST) -> set[str]:
+    refs: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            refs.add(child.id)
+    return refs
+
+
+def _query_transport_from_expr(expr: ast.AST, issued_vars: set[str]) -> tuple[str, str] | None:
+    text = ast.dump(expr, include_attributes=False).lower()
+    if "/s/" in text or "/share/" in text:
+        return None
+    query_key = _query_key_from_text(text)
+    if query_key is None or _is_non_finding_param(query_key):
+        return None
+    refs = _extract_name_refs(expr)
+    matched = next((name for name in refs if name in issued_vars), None)
+    if matched is None:
+        return None
+    kind = "query_fstring"
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        kind = "query_concatenation"
+    elif isinstance(expr, ast.Call):
+        symbol = _call_symbol(expr).lower()
+        if symbol.endswith(".format"):
+            kind = "query_format"
+        elif symbol.endswith("urlencode"):
+            kind = "query_urlencode"
+    return matched, kind
+
+
+def _js_or_template_query_transport_findings(rel: str, text: str) -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    issued_vars: set[str] = set()
+    lines = text.splitlines()
+    for idx, line in enumerate(lines, start=1):
+        lower = line.lower()
+        issue_match = re.search(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([a-zA-Z0-9_$.]+)\(", line)
+        if issue_match:
+            var_name = issue_match.group(1)
+            callee = issue_match.group(2).lower()
+            if re.search(r"(create|generate|issue).*(token|invite|share|public)", callee):
+                issued_vars.add(var_name)
+        if "?" not in line:
+            continue
+        query_key = _query_key_from_text(lower)
+        if query_key is None or _is_non_finding_param(query_key):
+            continue
+        token_var = next((var for var in issued_vars if re.search(rf"\b{re.escape(var)}\b", line)), None)
+        if token_var is None:
+            continue
+        if any(term in lower for term in ("location.href", "window.location", "fetch(", "history.pushstate", "href=", "redirect")):
+            sev, reason = _severity_from_entry(lower)
+            findings.append(
+                {
+                    "type": _URL_CAPABILITY_RULE_ID,
+                    "file": rel,
+                    "line": idx,
+                    "confidence": "high",
+                    "message": _URL_CAPABILITY_MESSAGE,
+                    "subtype": _subtype_for_name(query_key),
+                    "token_variable": token_var,
+                    "issuer_symbol": "js_or_template_issuer",
+                    "transport_kind": "query",
+                    "severity": sev,
+                    "severity_reason": reason,
+                    "remediation": "Prefer flash/session PRG or XHR create + DOM-only reveal.",
+                }
+            )
+    return findings
+
+
 def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, object]]:
     findings: list[dict[str, object]] = []
+    if _is_doc_or_fixture_context(rel):
+        return findings
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return findings
+    source_lines = text.splitlines()
+
+    issued_vars: set[str] = set()
+    issued_by: dict[str, str] = {}
+    issued_context: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            if _is_capability_issuer_call(node.value):
+                symbol = _call_symbol(node.value) or "issuer_helper"
+                assign_context = source_lines[node.lineno - 1] if 0 <= node.lineno - 1 < len(source_lines) else ""
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        issued_vars.add(target.id)
+                        issued_by[target.id] = symbol
+                        issued_context[target.id] = assign_context
+            elif isinstance(node.value, ast.Call):
+                symbol = _call_symbol(node.value).lower()
+                if re.search(r"(create|generate|issue)_[a-z0-9_]*(token|invite|share|public_link|api_key|session)", symbol):
+                    assign_context = source_lines[node.lineno - 1] if 0 <= node.lineno - 1 < len(source_lines) else ""
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            issued_vars.add(target.id)
+                            issued_by[target.id] = symbol
+                            issued_context[target.id] = assign_context
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -271,6 +463,46 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                                 "secret_value": default_value,
                             }
                         )
+        if isinstance(node, ast.Call):
+            call_name = _call_name(node).lower()
+            candidate_expr: ast.AST | None = None
+            if call_name == "redirect":
+                candidate_expr = node.args[0] if node.args else None
+            elif call_name == "redirectresponse":
+                for kw in node.keywords:
+                    if kw.arg == "url":
+                        candidate_expr = kw.value
+                        break
+                if candidate_expr is None and node.args:
+                    candidate_expr = node.args[0]
+            elif call_name == "urlencode":
+                candidate_expr = node
+            if candidate_expr is not None:
+                match = _query_transport_from_expr(candidate_expr, issued_vars)
+                if match is not None:
+                    token_var, _kind = match
+                    expr_text = ast.get_source_segment(text, candidate_expr) or ast.dump(candidate_expr, include_attributes=False)
+                    query_key = _query_key_from_text(expr_text.lower()) or token_var
+                    if _is_non_finding_param(query_key):
+                        continue
+                    context_line = source_lines[node.lineno - 1] if 0 <= node.lineno - 1 < len(source_lines) else ""
+                    sev, reason = _severity_from_entry(f"{expr_text} {context_line} {issued_context.get(token_var, '')}")
+                    findings.append(
+                        {
+                            "type": _URL_CAPABILITY_RULE_ID,
+                            "file": rel,
+                            "line": node.lineno,
+                            "confidence": "high",
+                            "message": _URL_CAPABILITY_MESSAGE,
+                            "subtype": _subtype_for_name(query_key),
+                            "token_variable": token_var,
+                            "issuer_symbol": issued_by.get(token_var, "issuer_helper"),
+                            "transport_kind": "query",
+                            "severity": sev,
+                            "severity_reason": reason,
+                            "remediation": "Prefer flash/session PRG or XHR create + DOM-only reveal.",
+                        }
+                    )
         if isinstance(node, ast.Call):
             call_name = _call_name(node)
             sink_match = call_name == "print" or call_name.startswith("logger.") or call_name in {"json.dump", "json.dumps"}
@@ -441,6 +673,12 @@ class SecretsHeuristicScanner(Scanner):
                     telemetry["probable"] += 1
                     findings.append(finding)
                 continue
+            if rel_lower.endswith((".js", ".ts", ".tsx", ".jsx", ".html", ".jinja", ".j2")) and not _is_doc_or_fixture_context(rel):
+                extra = _js_or_template_query_transport_findings(rel, text)
+                for finding in extra:
+                    telemetry["candidates_seen"] += 1
+                    telemetry["probable"] += 1
+                    findings.append(finding)
             for idx, line in enumerate(text.splitlines(), start=1):
                 if _KEY_LINE_RE.search(line):
                     telemetry["candidates_seen"] += 1

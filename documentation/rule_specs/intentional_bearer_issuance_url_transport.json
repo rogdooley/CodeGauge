@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0.0",
+  "rule_id": "intentional_bearer_issuance_url_transport",
+  "version": "1.0.0",
+  "status": "active",
+  "category": "security",
+  "default_severity": "medium",
+  "purpose": "Detect bearer-equivalent or capability-equivalent secrets transported in URL query strings after issuance.",
+  "subtypes": [
+    "public_access_token",
+    "invite_capability_code",
+    "reset_token",
+    "api_key",
+    "session_token",
+    "unknown_capability_token"
+  ],
+  "severity_escalation_conditions": [
+    "token_or_code_long_lived",
+    "token_or_code_multi_use",
+    "token_or_code_non_revocable",
+    "token_or_code_grants_privileged_capability",
+    "full_url_logging_enabled",
+    "third_party_telemetry_captures_urls"
+  ],
+  "severity_downgrade_to_low_when_all_true": [
+    "single_use",
+    "short_ttl",
+    "revocable",
+    "not_logged_in_app_proxy_or_access_logs",
+    "not_exposed_to_telemetry"
+  ],
+  "detect_patterns": [
+    "RedirectResponse URL with query parameter names containing token, public_token, invite, invite_code, code, reset_token, api_key, key, session carrying issued token or code values",
+    "url_for(...) plus query-string concatenation carrying issued token or code values",
+    "f-string redirects embedding token or code in query strings",
+    "templates or JavaScript constructing query URLs with bearer-equivalent values"
+  ],
+  "do_not_flag_patterns": [
+    "CSRF hidden form inputs",
+    "non_secret_pagination_cursors_without_access_capability",
+    "opaque_flash_ids_with_short_ttl_and_no_bearer_access",
+    "test_fixtures",
+    "documentation_placeholders",
+    "canonical_public_path_links_like_/s/{token}"
+  ],
+  "separate_classification": {
+    "canonical_public_path_links_like_/s/{token}": "bearer_token_in_url_path"
+  },
+  "remediation": [
+    "Prefer flash/session PRG with clean redirect.",
+    "Prefer XHR create plus DOM-only reveal.",
+    "Never place newly issued bearer or capability material in redirect query strings."
+  ],
+  "examples": [
+    {
+      "name": "public_token redirect",
+      "code": "return RedirectResponse(url=f\"/callback?public_token={public_token}\")",
+      "expected": {
+        "finding": true,
+        "severity": "medium",
+        "rule_id": "intentional_bearer_issuance_url_transport",
+        "subtype": "public_access_token"
+      }
+    },
+    {
+      "name": "invite_created redirect",
+      "code": "return RedirectResponse(url=f\"/invite/created?invite={invite_code}\")",
+      "expected": {
+        "finding": true,
+        "severity": "medium",
+        "rule_id": "intentional_bearer_issuance_url_transport",
+        "subtype": "invite_capability_code"
+      }
+    },
+    {
+      "name": "created invite code redirect",
+      "code": "url = url_for(\"invite_created\") + \"?code=\" + invite_code",
+      "expected": {
+        "finding": true,
+        "severity": "medium",
+        "rule_id": "intentional_bearer_issuance_url_transport",
+        "subtype": "invite_capability_code"
+      }
+    },
+    {
+      "name": "reset_token redirect medium",
+      "code": "return RedirectResponse(url=f\"/reset?reset_token={token}\")",
+      "expected": {
+        "finding": true,
+        "severity": "medium",
+        "rule_id": "intentional_bearer_issuance_url_transport",
+        "subtype": "reset_token"
+      }
+    },
+    {
+      "name": "reset_token redirect high when long lived",
+      "code": "return RedirectResponse(url=f\"/reset?reset_token={token}\")  # token is multi-use, 30 day ttl",
+      "expected": {
+        "finding": true,
+        "severity": "high",
+        "rule_id": "intentional_bearer_issuance_url_transport",
+        "subtype": "reset_token"
+      }
+    },
+    {
+      "name": "flash session clean redirect",
+      "code": "flash_id = session.store(invite_code); return RedirectResponse(url=\"/invite/created\")",
+      "expected": {
+        "finding": false
+      }
+    },
+    {
+      "name": "csrf_token hidden input",
+      "code": "<input type=\"hidden\" name=\"csrf_token\" value=\"{{ csrf_token }}\">",
+      "expected": {
+        "finding": false
+      }
+    },
+    {
+      "name": "canonical public path link separate rule",
+      "code": "return {\"url\": f\"https://example.com/s/{token}\"}",
+      "expected": {
+        "finding": false,
+        "separate_rule_id": "bearer_token_in_url_path"
+      }
+    }
+  ]
+}
