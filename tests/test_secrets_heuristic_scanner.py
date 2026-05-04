@@ -157,6 +157,58 @@ def test_python_sink_logging_and_response_leaks_are_flagged(tmp_path: Path) -> N
     assert any("response leak" in item["message"] for item in payload["findings"])
 
 
+def test_intentional_capability_token_response_not_flagged_as_probable_secret(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp1"
+    project.mkdir()
+    (project / "entry_service.py").write_text(
+        "import secrets\n"
+        "def create_public_link():\n"
+        "    token = secrets.token_urlsafe(32)\n"
+        "    return {'ok': True, 'token': token}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert not any(item["type"] == "probable_secret_exposure" for item in payload["findings"])
+
+
+def test_totp_enrollment_secret_display_js_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp2"
+    project.mkdir()
+    (project / "totp.js").write_text(
+        "function start() {\n"
+        "  var secret = document.getElementById('totp-secret');\n"
+        "  secret.textContent = payload.secret;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_login_template_state_token_and_csrf_hidden_input_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp3"
+    project.mkdir()
+    (project / "login.html").write_text(
+        "<button data-login-state-token=\"{{ login_state_token }}\"></button>\n"
+        "<input type=\"hidden\" name=\"csrf_token\" value=\"{{ csrf_token(request) }}\" />\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_internal_auth_session_response_leak_still_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp4"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        "def leak(access_token, session_token):\n"
+        "    return {'access_token': access_token, 'session_token': session_token}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "probable_secret_exposure" and "response leak" in item["message"] for item in payload["findings"])
+
+
 def test_python_parameter_and_attribute_names_not_flagged(tmp_path: Path) -> None:
     project = tmp_path / "repo13"
     project.mkdir()
@@ -250,3 +302,88 @@ def test_url_bearer_rule_non_findings_for_flash_csrf_cursor_path_and_docs(tmp_pa
     )
     payload = _run(SecretsHeuristicScanner(), project)
     assert not any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_memexa_entries_pattern_intermediate_url_variable_redirectresponse(tmp_path: Path) -> None:
+    project = tmp_path / "repo18"
+    project.mkdir()
+    (project / "entries.py").write_text(
+        "import secrets\n"
+        "def route():\n"
+        "    public_token = secrets.token_urlsafe(24)\n"
+        "    redirect_url = f\"/entries?public_token={public_token}\"\n"
+        "    return RedirectResponse(url=redirect_url)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_memexa_entries_pattern_url_for_plus_query_concat(tmp_path: Path) -> None:
+    project = tmp_path / "repo19"
+    project.mkdir()
+    (project / "entries.py").write_text(
+        "def issue_public_token():\n"
+        "    return 'abc'\n"
+        "def route():\n"
+        "    public_token = issue_public_token()\n"
+        "    target = url_for('entries') + '?public_token=' + public_token\n"
+        "    return redirect(target)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_memexa_conversation_pattern_query_dict_and_urlencode(tmp_path: Path) -> None:
+    project = tmp_path / "repo20"
+    project.mkdir()
+    (project / "conversation.py").write_text(
+        "def create_invite():\n"
+        "    return 'abc'\n"
+        "def route():\n"
+        "    invite_code = create_invite()\n"
+        "    params = {'invite_code': invite_code}\n"
+        "    query = urlencode(params)\n"
+        "    target = url_for('invite_created') + '?' + query\n"
+        "    return RedirectResponse(url=target)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_memexa_admin_invite_created_helper_built_url(tmp_path: Path) -> None:
+    project = tmp_path / "repo21"
+    project.mkdir()
+    (project / "admin.py").write_text(
+        "def create_invite():\n"
+        "    return 'abc'\n"
+        "def build_invite_created_url(invite_code):\n"
+        "    return f\"/admin/invite_created?invite_code={invite_code}\"\n"
+        "def route():\n"
+        "    invite_code = create_invite()\n"
+        "    redirect_url = build_invite_created_url(invite_code)\n"
+        "    return redirect(redirect_url)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_memexa_admin_created_helper_url_then_redirectresponse(tmp_path: Path) -> None:
+    project = tmp_path / "repo22"
+    project.mkdir()
+    (project / "admin.py").write_text(
+        "def issue_reset_token():\n"
+        "    return 'abc'\n"
+        "def make_created_redirect_url(reset_token):\n"
+        "    return f\"/admin/created?reset_token={reset_token}\"\n"
+        "def route():\n"
+        "    reset_token = issue_reset_token()\n"
+        "    url_value = make_created_redirect_url(reset_token)\n"
+        "    return RedirectResponse(url=url_value)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])

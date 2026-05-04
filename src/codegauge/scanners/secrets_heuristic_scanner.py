@@ -51,6 +51,8 @@ _EXCLUDED_VARIABLE_NAMES = {
     "credential_blob",
     "secret_length",
     "min_password_length",
+    "login_state_token",
+    "challenge_token",
 }
 
 _ALLOWLIST_VARIABLE_NAMES = {
@@ -247,6 +249,31 @@ def _subtype_for_name(name: str) -> str:
     return _CAPABILITY_SUBTYPE_BY_NAME.get(normalized, "unknown_capability_token")
 
 
+def _dict_key_names(node: ast.Dict) -> set[str]:
+    names: set[str] = set()
+    for key_node in node.keys:
+        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+            names.add(_normalize_name(str(key_node.value)))
+    return names
+
+
+def _is_intentional_capability_response(dict_node: ast.Dict, leaked_name: str, issued_vars: set[str]) -> bool:
+    if leaked_name not in issued_vars:
+        return False
+    # Intentional one-time/public capability issuance should not be flagged as probable_secret_exposure.
+    # Internal auth/session tokens must still be flagged elsewhere.
+    capability_keys = {
+        "token",
+        "public_token",
+        "invite_code",
+        "invite_created",
+        "created",
+        "reset_token",
+        "share_token",
+    }
+    return bool(_dict_key_names(dict_node).intersection(capability_keys))
+
+
 def _signals(variable_name: str, value: str) -> dict[str, object]:
     normalized_name = _normalize_name(variable_name)
     allowlisted = normalized_name in _ALLOWLIST_VARIABLE_NAMES
@@ -318,6 +345,11 @@ def _extract_name_refs(node: ast.AST) -> set[str]:
     return refs
 
 
+def _ordered_nodes(tree: ast.AST, node_type: type[ast.AST]) -> list[ast.AST]:
+    nodes = [node for node in ast.walk(tree) if isinstance(node, node_type)]
+    return sorted(nodes, key=lambda item: (getattr(item, "lineno", 0), getattr(item, "col_offset", 0)))
+
+
 def _query_transport_from_expr(expr: ast.AST, issued_vars: set[str]) -> tuple[str, str] | None:
     text = ast.dump(expr, include_attributes=False).lower()
     if "/s/" in text or "/share/" in text:
@@ -339,6 +371,15 @@ def _query_transport_from_expr(expr: ast.AST, issued_vars: set[str]) -> tuple[st
         elif symbol.endswith("urlencode"):
             kind = "query_urlencode"
     return matched, kind
+
+
+def _is_url_builder_symbol(symbol: str) -> bool:
+    lowered = symbol.lower()
+    return any(token in lowered for token in ("url", "redirect", "link"))
+
+
+def _resolve_query_key(text: str, token_var: str) -> str:
+    return _query_key_from_text(text) or token_var
 
 
 def _js_or_template_query_transport_findings(rel: str, text: str) -> list[dict[str, object]]:
@@ -393,9 +434,14 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
     source_lines = text.splitlines()
 
     issued_vars: set[str] = set()
+    issued_or_alias: set[str] = set()
     issued_by: dict[str, str] = {}
     issued_context: dict[str, str] = {}
-    for node in ast.walk(tree):
+    dict_query_vars: dict[str, tuple[str, str]] = {}
+    encoded_query_vars: dict[str, tuple[str, str]] = {}
+    url_vars: dict[str, tuple[str, str]] = {}
+    helper_url_vars: dict[str, tuple[str, str]] = {}
+    for node in _ordered_nodes(tree, ast.Assign):
         if isinstance(node, ast.Assign):
             if _is_capability_issuer_call(node.value):
                 symbol = _call_symbol(node.value) or "issuer_helper"
@@ -403,6 +449,7 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         issued_vars.add(target.id)
+                        issued_or_alias.add(target.id)
                         issued_by[target.id] = symbol
                         issued_context[target.id] = assign_context
             elif isinstance(node.value, ast.Call):
@@ -412,8 +459,56 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                     for target in node.targets:
                         if isinstance(target, ast.Name):
                             issued_vars.add(target.id)
+                            issued_or_alias.add(target.id)
                             issued_by[target.id] = symbol
                             issued_context[target.id] = assign_context
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if isinstance(node.value, ast.Name) and node.value.id in issued_or_alias:
+                    issued_or_alias.add(target.id)
+                    issued_by[target.id] = issued_by.get(node.value.id, "issuer_alias")
+                    issued_context[target.id] = issued_context.get(node.value.id, "")
+                if isinstance(node.value, ast.Dict):
+                    keys = node.value.keys
+                    values = node.value.values
+                    for key_node, value_node in zip(keys, values):
+                        if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
+                            continue
+                        key_name = str(key_node.value)
+                        if _is_non_finding_param(key_name):
+                            continue
+                        if isinstance(value_node, ast.Name) and value_node.id in issued_or_alias:
+                            dict_query_vars[target.id] = (value_node.id, key_name)
+                if isinstance(node.value, ast.Call):
+                    symbol = _call_symbol(node.value).lower()
+                    if symbol.endswith("urlencode") and node.value.args and isinstance(node.value.args[0], ast.Name):
+                        var_name = node.value.args[0].id
+                        if var_name in dict_query_vars:
+                            encoded_query_vars[target.id] = dict_query_vars[var_name]
+                    if _is_url_builder_symbol(symbol):
+                        token_arg = next(
+                            (arg.id for arg in node.value.args if isinstance(arg, ast.Name) and arg.id in issued_or_alias),
+                            None,
+                        )
+                        if token_arg is not None:
+                            helper_url_vars[target.id] = (token_arg, token_arg)
+                expr_text = ast.get_source_segment(text, node.value) or ast.dump(node.value, include_attributes=False)
+                direct = _query_transport_from_expr(node.value, issued_or_alias)
+                if direct is not None:
+                    token_var, kind = direct
+                    query_key = _resolve_query_key(expr_text.lower(), token_var)
+                    if not _is_non_finding_param(query_key):
+                        url_vars[target.id] = (token_var, query_key)
+                elif isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
+                    refs = _extract_name_refs(node.value)
+                    encoded_ref = next((name for name in refs if name in encoded_query_vars), None)
+                    if encoded_ref is not None:
+                        url_vars[target.id] = encoded_query_vars[encoded_ref]
+                    else:
+                        helper_ref = next((name for name in refs if name in helper_url_vars), None)
+                        if helper_ref is not None:
+                            url_vars[target.id] = helper_url_vars[helper_ref]
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -478,11 +573,53 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
             elif call_name == "urlencode":
                 candidate_expr = node
             if candidate_expr is not None:
-                match = _query_transport_from_expr(candidate_expr, issued_vars)
+                if isinstance(candidate_expr, ast.Name) and candidate_expr.id in url_vars:
+                    token_var, query_key = url_vars[candidate_expr.id]
+                    context_line = source_lines[node.lineno - 1] if 0 <= node.lineno - 1 < len(source_lines) else ""
+                    sev, reason = _severity_from_entry(f"{context_line} {issued_context.get(token_var, '')}")
+                    findings.append(
+                        {
+                            "type": _URL_CAPABILITY_RULE_ID,
+                            "file": rel,
+                            "line": node.lineno,
+                            "confidence": "high",
+                            "message": _URL_CAPABILITY_MESSAGE,
+                            "subtype": _subtype_for_name(query_key),
+                            "token_variable": token_var,
+                            "issuer_symbol": issued_by.get(token_var, "issuer_helper"),
+                            "transport_kind": "query",
+                            "severity": sev,
+                            "severity_reason": reason,
+                            "remediation": "Prefer flash/session PRG or XHR create + DOM-only reveal.",
+                        }
+                    )
+                    continue
+                if isinstance(candidate_expr, ast.Name) and candidate_expr.id in helper_url_vars:
+                    token_var, query_key = helper_url_vars[candidate_expr.id]
+                    context_line = source_lines[node.lineno - 1] if 0 <= node.lineno - 1 < len(source_lines) else ""
+                    sev, reason = _severity_from_entry(f"{context_line} {issued_context.get(token_var, '')}")
+                    findings.append(
+                        {
+                            "type": _URL_CAPABILITY_RULE_ID,
+                            "file": rel,
+                            "line": node.lineno,
+                            "confidence": "high",
+                            "message": _URL_CAPABILITY_MESSAGE,
+                            "subtype": _subtype_for_name(query_key),
+                            "token_variable": token_var,
+                            "issuer_symbol": issued_by.get(token_var, "issuer_helper"),
+                            "transport_kind": "query",
+                            "severity": sev,
+                            "severity_reason": reason,
+                            "remediation": "Prefer flash/session PRG or XHR create + DOM-only reveal.",
+                        }
+                    )
+                    continue
+                match = _query_transport_from_expr(candidate_expr, issued_or_alias)
                 if match is not None:
                     token_var, _kind = match
                     expr_text = ast.get_source_segment(text, candidate_expr) or ast.dump(candidate_expr, include_attributes=False)
-                    query_key = _query_key_from_text(expr_text.lower()) or token_var
+                    query_key = _resolve_query_key(expr_text.lower(), token_var)
                     if _is_non_finding_param(query_key):
                         continue
                     context_line = source_lines[node.lineno - 1] if 0 <= node.lineno - 1 < len(source_lines) else ""
@@ -525,6 +662,8 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
         if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
             leaked_name = _contains_suspicious_name(node.value)
             if leaked_name is not None:
+                if _is_intentional_capability_response(node.value, leaked_name, issued_or_alias):
+                    continue
                 findings.append(
                     {
                         "type": "probable_secret_exposure",
