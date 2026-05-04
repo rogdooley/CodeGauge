@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import math
 import re
@@ -502,6 +503,108 @@ def _classify_sqlalchemy_text_call(
     return "UNKNOWN_COMPLEX"
 
 
+def _normalize_sql_fragment(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _sqlalchemy_pattern_key(expr: ast.AST, classification: str, source_text: str) -> str:
+    normalized = _normalize_sql_fragment(source_text)
+    if "order by {" in normalized or "order by {{" in normalized:
+        return "dynamic_order_fragment"
+    if "_quote_ident(" in normalized:
+        return "quoted_identifier_builder"
+    if " in (" in normalized and (":id_" in normalized or "placeholders" in normalized):
+        return "dynamic_in_placeholder_expansion"
+    if " where {" in normalized or (" where " in normalized and isinstance(expr, ast.JoinedStr)):
+        return "dynamic_where_fragment"
+    if "select {" in normalized:
+        return "dynamic_projection_fragment"
+    if " from {" in normalized or " into {" in normalized:
+        return "dynamic_table_or_identifier_fragment"
+    if classification == "UNKNOWN_COMPLEX":
+        return "unknown_complex_sql_pattern"
+    return "unknown_complex_sql_pattern"
+
+
+def _sqlalchemy_pattern_fingerprint(expr: ast.AST, pattern_key: str) -> str:
+    if isinstance(expr, ast.JoinedStr):
+        part_shapes: list[str] = []
+        for part in expr.values:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                part_shapes.append("CONST")
+            elif isinstance(part, ast.FormattedValue):
+                part_shapes.append(f"FMT:{ast.dump(part.value, include_attributes=False)}")
+            else:
+                part_shapes.append(type(part).__name__)
+        shape = "|".join(part_shapes)
+    else:
+        shape = ast.dump(expr, include_attributes=False)
+    digest = hashlib.sha256(f"{pattern_key}|{shape}".encode("utf-8")).hexdigest()[:16]
+    return f"{pattern_key}:{digest}"
+
+
+def _sqlalchemy_confidence_for_classification(classification: str) -> str:
+    if classification == "UNSAFE_INTERPOLATED":
+        return "high"
+    if classification == "UNKNOWN_COMPLEX":
+        return "medium"
+    return "low"
+
+
+def _sqlalchemy_cluster_summary(findings: list[dict[str, object]]) -> dict[str, object]:
+    sql_rows = [
+        item
+        for item in findings
+        if str(item.get("type")) in {_SQL_TEXT_FINDING_TYPE, _SQL_TEXT_REVIEW_FINDING_TYPE}
+        and isinstance(item.get("sqlalchemy_pattern_key"), str)
+        and isinstance(item.get("sqlalchemy_pattern_fingerprint"), str)
+    ]
+    clusters: dict[str, dict[str, object]] = {}
+    for row in sql_rows:
+        fingerprint = str(row["sqlalchemy_pattern_fingerprint"])
+        file_value = str(row.get("file") or "")
+        bucket = clusters.setdefault(
+            fingerprint,
+            {
+                "sqlalchemy_pattern_key": str(row.get("sqlalchemy_pattern_key") or "unknown_complex_sql_pattern"),
+                "sqlalchemy_pattern_fingerprint": fingerprint,
+                "sqlalchemy_classification": str(row.get("sqlalchemy_classification") or "UNKNOWN_COMPLEX"),
+                "confidence": str(row.get("confidence") or "weak"),
+                "count": 0,
+                "files": {},
+            },
+        )
+        bucket["count"] = int(bucket["count"]) + 1
+        files = bucket["files"]
+        assert isinstance(files, dict)
+        files[file_value] = int(files.get(file_value, 0)) + 1
+    rows: list[dict[str, object]] = []
+    for cluster in clusters.values():
+        files = cluster.pop("files")
+        assert isinstance(files, dict)
+        file_rows = [{"file": file_name, "count": count} for file_name, count in files.items()]
+        file_rows.sort(key=lambda item: (-int(item["count"]), str(item["file"])))
+        rows.append(
+            {
+                **cluster,
+                "file_count": len(file_rows),
+                "files": file_rows,
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            str(item["sqlalchemy_pattern_key"]),
+            -int(item["count"]),
+            str(item["sqlalchemy_pattern_fingerprint"]),
+        )
+    )
+    return {
+        "total_sqlalchemy_findings": len(sql_rows),
+        "cluster_count": len(rows),
+        "clusters": rows,
+    }
+
+
 def _is_capability_issuer_call(node: ast.AST) -> bool:
     symbol = _call_symbol(node).lower()
     if symbol in {"secrets.token_urlsafe", "secrets.token_hex", "uuid.uuid4"}:
@@ -836,6 +939,11 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                     assignments=assignments,
                     func_node=_enclosing_function(node),
                 )
+                expr = node.args[0] if node.args else ast.Constant(value="")
+                source_expr = ast.get_source_segment(text, expr) or ast.dump(expr, include_attributes=False)
+                pattern_key = _sqlalchemy_pattern_key(expr, classification, source_expr)
+                pattern_fingerprint = _sqlalchemy_pattern_fingerprint(expr, pattern_key)
+                classification_confidence = _sqlalchemy_confidence_for_classification(classification)
                 if classification == "UNSAFE_INTERPOLATED":
                     findings.append(
                         {
@@ -847,6 +955,10 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                             "confidence": "probable",
                             "score": 4,
                             "classification": classification,
+                            "sqlalchemy_pattern_key": pattern_key,
+                            "sqlalchemy_pattern_fingerprint": pattern_fingerprint,
+                            "sqlalchemy_classification": classification,
+                            "sqlalchemy_confidence": classification_confidence,
                         }
                     )
                 elif classification == "UNKNOWN_COMPLEX":
@@ -860,6 +972,10 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                             "confidence": "weak",
                             "score": 1,
                             "classification": classification,
+                            "sqlalchemy_pattern_key": pattern_key,
+                            "sqlalchemy_pattern_fingerprint": pattern_fingerprint,
+                            "sqlalchemy_classification": classification,
+                            "sqlalchemy_confidence": classification_confidence,
                         }
                     )
             call_name = _call_name(node)
@@ -1140,11 +1256,13 @@ class SecretsHeuristicScanner(Scanner):
         candidate_total = int(telemetry["candidates_seen"])
         suppressed = int(telemetry["allowlisted"] + telemetry["noise_dropped"])
         suppression_rate = round((suppressed / candidate_total) * 100.0, 2) if candidate_total else 0.0
+        sqlalchemy_clustering = _sqlalchemy_cluster_summary(findings)
         return ScannerCommandResult(
             command=self.build_command(project_path),
             stdout=json.dumps(
                 {
                     "findings": findings,
+                    "sqlalchemy_clustering": sqlalchemy_clustering,
                     "scalar_metrics": {
                         "secrets_candidates_seen": candidate_total,
                         "secrets_allowlisted": int(telemetry["allowlisted"]),
@@ -1168,6 +1286,7 @@ class SecretsHeuristicScanner(Scanner):
                     "secrets_probable": int(telemetry["probable"]),
                     "secrets_weak": int(telemetry["weak"]),
                     "secrets_suppression_rate_percent": suppression_rate,
-                }
+                },
+                "sqlalchemy_clustering": sqlalchemy_clustering,
             },
         )

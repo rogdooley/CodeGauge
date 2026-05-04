@@ -776,3 +776,102 @@ def test_memexa_sqlalchemy_examples_classification(
     has_review = any(item["type"] == "sqlalchemy_text_review_required" for item in payload["findings"])
     assert has_security is expected_security
     assert has_review is expected_review
+
+
+def test_sqlalchemy_repeated_dynamic_where_fragments_cluster_together(tmp_path: Path) -> None:
+    project = tmp_path / "cluster_repo1"
+    project.mkdir()
+    (project / "a.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(parts):\n"
+        "    where_sql = ' AND '.join(parts)\n"
+        "    return text(f\"SELECT * FROM t WHERE {where_sql}\")\n",
+        encoding="utf-8",
+    )
+    (project / "b.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(parts):\n"
+        "    where_sql = ' AND '.join(parts)\n"
+        "    return text(f\"SELECT id FROM t WHERE {where_sql}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    sql_findings = [f for f in payload["findings"] if f["type"] == "sqlalchemy_text_review_required"]
+    assert len(sql_findings) == 2
+    keys = {f["sqlalchemy_pattern_key"] for f in sql_findings}
+    assert keys == {"dynamic_where_fragment"}
+    fingerprints = {f["sqlalchemy_pattern_fingerprint"] for f in sql_findings}
+    assert len(fingerprints) == 1
+
+
+def test_sqlalchemy_dynamic_in_placeholder_expansion_has_own_key(tmp_path: Path) -> None:
+    project = tmp_path / "cluster_repo2"
+    project.mkdir()
+    (project / "a.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(ids):\n"
+        "    placeholders = ', '.join(f':id_{i}' for i in range(len(ids)))\n"
+        "    return text(f\"SELECT * FROM t WHERE id IN ({placeholders})\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(f for f in payload["findings"] if f["type"] == "sqlalchemy_text_review_required")
+    assert finding["sqlalchemy_pattern_key"] == "dynamic_in_placeholder_expansion"
+
+
+def test_sqlalchemy_quoted_identifier_builder_has_own_key(tmp_path: Path) -> None:
+    project = tmp_path / "cluster_repo3"
+    project.mkdir()
+    (project / "a.py").write_text(
+        "from sqlalchemy import text\n"
+        "def _quote_ident(x):\n"
+        "    return x\n"
+        "def q(table):\n"
+        "    return text(f\"SELECT COUNT(*) FROM {_quote_ident(table)}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(f for f in payload["findings"] if f["type"] == "sqlalchemy_text_review_required")
+    assert finding["sqlalchemy_pattern_key"] == "quoted_identifier_builder"
+
+
+def test_sqlalchemy_unrelated_unknown_complex_patterns_do_not_collapse(tmp_path: Path) -> None:
+    project = tmp_path / "cluster_repo4"
+    project.mkdir()
+    (project / "a.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(parts):\n"
+        "    where_sql = ' AND '.join(parts)\n"
+        "    return text(f\"SELECT * FROM t WHERE {where_sql}\")\n",
+        encoding="utf-8",
+    )
+    (project / "b.py").write_text(
+        "from sqlalchemy import text\n"
+        "def _quote_ident(x):\n"
+        "    return x\n"
+        "def q(table):\n"
+        "    return text(f\"SELECT * FROM {_quote_ident(table)}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    sql_findings = [f for f in payload["findings"] if f["type"] == "sqlalchemy_text_review_required"]
+    assert len(sql_findings) == 2
+    fingerprints = {f["sqlalchemy_pattern_fingerprint"] for f in sql_findings}
+    assert len(fingerprints) == 2
+    keys = {f["sqlalchemy_pattern_key"] for f in sql_findings}
+    assert keys == {"dynamic_where_fragment", "quoted_identifier_builder"}
+
+
+def test_sqlalchemy_clustering_does_not_change_raw_finding_count(tmp_path: Path) -> None:
+    project = tmp_path / "cluster_repo5"
+    project.mkdir()
+    (project / "a.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(x):\n"
+        "    return text(f\"SELECT * FROM t WHERE id = {x}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    raw_count = len(payload["findings"])
+    summary_count = int(payload["sqlalchemy_clustering"]["total_sqlalchemy_findings"])
+    assert raw_count == summary_count
