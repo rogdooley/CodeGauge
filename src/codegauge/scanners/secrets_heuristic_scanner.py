@@ -108,12 +108,15 @@ _QUERY_PARAM_HINTS = (
     "token",
     "public_token",
     "invite",
+    "invite_created",
+    "created",
     "invite_code",
     "code",
     "reset_token",
     "api_key",
     "key",
     "session",
+    "session_token",
     "challenge_token",
 )
 _NON_FINDING_PARAM_HINTS = ("csrf_token", "csrftoken", "xsrf", "cursor", "page_token", "offset_token", "flash", "flash_id", "nonce_id")

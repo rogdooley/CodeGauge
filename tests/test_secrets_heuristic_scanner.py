@@ -294,6 +294,34 @@ def test_python_challenge_token_query_transport_flagged(tmp_path: Path) -> None:
     assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
 
 
+def test_backend_local_challenge_token_assignment_without_sink_or_transport_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp11"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        "import secrets\n"
+        "def build():\n"
+        "    challenge_token = secrets.token_urlsafe(16)\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_backend_redirectresponse_challenge_token_query_transport_is_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp12"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        "import secrets\n"
+        "def route():\n"
+        "    challenge_token = secrets.token_urlsafe(16)\n"
+        "    return RedirectResponse(url=f\"/verify?challenge_token={challenge_token}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
 def test_python_parameter_and_attribute_names_not_flagged(tmp_path: Path) -> None:
     project = tmp_path / "repo13"
     project.mkdir()
