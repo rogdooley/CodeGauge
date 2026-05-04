@@ -349,6 +349,34 @@ def _is_sqlalchemy_text_call(node: ast.Call) -> bool:
     return symbol == "text" or symbol.endswith(".text")
 
 
+def _sqlalchemy_import_context(tree: ast.AST) -> tuple[set[str], set[str]]:
+    text_symbols: set[str] = set()
+    module_symbols: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = (node.module or "").lower()
+            if module == "sqlalchemy" or module.startswith("sqlalchemy."):
+                for alias in node.names:
+                    if alias.name == "text":
+                        text_symbols.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.name.lower()
+                if name == "sqlalchemy":
+                    module_symbols.add(alias.asname or "sqlalchemy")
+    return text_symbols, module_symbols
+
+
+def _is_resolved_sqlalchemy_text_call(node: ast.Call, sqlalchemy_text_symbols: set[str], sqlalchemy_module_symbols: set[str]) -> bool:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id in sqlalchemy_text_symbols
+    if isinstance(func, ast.Attribute) and func.attr == "text":
+        base_name = _extract_name(func.value)
+        return bool(base_name and base_name in sqlalchemy_module_symbols)
+    return False
+
+
 def _is_constant_string_expr(node: ast.AST) -> bool:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return True
@@ -483,6 +511,7 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
     except SyntaxError:
         return findings
     source_lines = text.splitlines()
+    sqlalchemy_text_symbols, sqlalchemy_module_symbols = _sqlalchemy_import_context(tree)
 
     issued_vars: set[str] = set()
     issued_or_alias: set[str] = set()
@@ -692,7 +721,7 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                         }
                     )
         if isinstance(node, ast.Call):
-            if _is_sqlalchemy_text_call(node):
+            if _is_resolved_sqlalchemy_text_call(node, sqlalchemy_text_symbols, sqlalchemy_module_symbols):
                 classification = _classify_sqlalchemy_text_call(node)
                 if classification == "UNSAFE_INTERPOLATED":
                     findings.append(

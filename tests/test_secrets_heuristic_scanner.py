@@ -474,3 +474,31 @@ def test_sqlalchemy_text_constant_literal_is_not_flagged(tmp_path: Path) -> None
     )
     payload = _run(SecretsHeuristicScanner(), project)
     assert not any(item["type"] == "unsafe_dynamic_sql_construction" for item in payload["findings"])
+
+
+def test_non_sqlalchemy_text_fstring_is_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo29"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "def text(value):\n"
+        "    return value\n"
+        "def q(x):\n"
+        "    return text(f\"select * from users where id = {x}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert not any(item["type"] == "unsafe_dynamic_sql_construction" for item in payload["findings"])
+
+
+def test_sqlalchemy_module_alias_text_fstring_is_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo30"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "import sqlalchemy as sa\n"
+        "def q(x):\n"
+        "    return sa.text(f\"select * from users where id = {x}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(item for item in payload["findings"] if item["type"] == "unsafe_dynamic_sql_construction")
+    assert finding["classification"] == "UNSAFE_INTERPOLATED"

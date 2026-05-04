@@ -14,6 +14,7 @@ def test_security_classifier_contract_snapshot() -> None:
             "path_runtime",
             "path_tooling",
             "path_test",
+            "path_documentation",
             "bandit_b105_token_literal",
             "bandit_b404_tool_subprocess",
             "bandit_b603_tool_subprocess",
