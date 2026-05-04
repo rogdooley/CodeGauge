@@ -170,3 +170,31 @@ def test_secrets_heuristic_parser_maps_url_bearer_transport_rule() -> None:
     assert findings[0].rule_id == "intentional_bearer_issuance_url_transport"
     assert findings[0].severity.value == "high"
     assert findings[0].raw_payload["subtype"] == "invite_capability_code"
+    assert findings[0].raw_payload["token_variable"] == "invite_code"
+    assert findings[0].raw_payload["issuer_symbol"] == "create_invite"
+    assert findings[0].raw_payload["transport_kind"] == "query"
+    assert findings[0].raw_payload["severity_reason"] == "high_risk_token_characteristics_or_url_observability"
+    assert findings[0].raw_payload["confidence"] == "probable"
+
+
+def test_secrets_heuristic_parser_maps_sqlalchemy_unknown_complex_to_lint() -> None:
+    parser = SecretsHeuristicParser()
+    stdout = json.dumps(
+        {
+            "findings": [
+                {
+                    "type": "sqlalchemy_text_review_required",
+                    "rule_id": "PY.SQLA.TEXT.UNKNOWN_COMPLEX",
+                    "file": "src/app.py",
+                    "line": 22,
+                    "message": "sqlalchemy.text() query shape is dynamic and could not be proven safe; review construction and parameter binding.",
+                    "confidence": "weak",
+                    "classification": "UNKNOWN_COMPLEX",
+                }
+            ]
+        }
+    )
+    findings = parser.parse(stdout, "", Path.cwd())
+    assert findings[0].rule_id == "sqlalchemy_text_review_required"
+    assert findings[0].category.value == "lint"
+    assert findings[0].severity.value == "low"

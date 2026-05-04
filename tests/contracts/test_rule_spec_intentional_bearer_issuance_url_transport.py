@@ -37,6 +37,14 @@ def test_intentional_bearer_rule_spec_contract_is_stable() -> None:
         "not_logged_in_app_proxy_or_access_logs",
         "not_exposed_to_telemetry",
     ]
+    assert payload["emitted_metadata"] == [
+        "subtype",
+        "token_variable",
+        "issuer_symbol",
+        "transport_kind",
+        "severity_reason",
+        "confidence",
+    ]
 
     remediation = payload.get("remediation")
     assert isinstance(remediation, list)

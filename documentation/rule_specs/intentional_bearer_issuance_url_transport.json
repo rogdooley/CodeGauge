@@ -43,6 +43,14 @@
     "documentation_placeholders",
     "canonical_public_path_links_like_/s/{token}"
   ],
+  "emitted_metadata": [
+    "subtype",
+    "token_variable",
+    "issuer_symbol",
+    "transport_kind",
+    "severity_reason",
+    "confidence"
+  ],
   "separate_classification": {
     "canonical_public_path_links_like_/s/{token}": "bearer_token_in_url_path"
   },
