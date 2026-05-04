@@ -38,6 +38,8 @@ _SUSPICIOUS_VARIABLE_NAMES = {
     "access_token",
     "refresh_token",
     "password",
+    "challenge_token",
+    "login_state_token",
 }
 
 _EXCLUDED_VARIABLE_NAMES = {
@@ -102,7 +104,18 @@ _URL_CAPABILITY_MESSAGE = (
     "Bearer-equivalent capability material is transported in URL query parameters after issuance, increasing exposure via "
     "logs, browser history, referrer propagation, and telemetry capture."
 )
-_QUERY_PARAM_HINTS = ("token", "public_token", "invite", "invite_code", "code", "reset_token", "api_key", "key", "session")
+_QUERY_PARAM_HINTS = (
+    "token",
+    "public_token",
+    "invite",
+    "invite_code",
+    "code",
+    "reset_token",
+    "api_key",
+    "key",
+    "session",
+    "challenge_token",
+)
 _NON_FINDING_PARAM_HINTS = ("csrf_token", "csrftoken", "xsrf", "cursor", "page_token", "offset_token", "flash", "flash_id", "nonce_id")
 _CAPABILITY_SUBTYPE_BY_NAME = {
     "public_token": "public_access_token",
@@ -126,6 +139,9 @@ _NON_FINDING_PARAM_NORMALIZED = {
 }
 _SQL_TEXT_FINDING_TYPE = "unsafe_dynamic_sql_construction"
 _SQL_TEXT_RULE_ID = "PY.SQLA.TEXT.UNSAFE_INTERPOLATED"
+_SQL_TEXT_REVIEW_FINDING_TYPE = "sqlalchemy_text_review_required"
+_SQL_TEXT_REVIEW_RULE_ID = "PY.SQLA.TEXT.UNKNOWN_COMPLEX"
+_SQL_IDENTIFIER_WRAPPER_CALLS = {"_quote_ident"}
 
 
 def _normalize_name(name: str) -> str:
@@ -215,6 +231,12 @@ def _is_doc_or_fixture_context(rel: str) -> bool:
 def _is_intentional_frontend_token_pattern(line: str) -> bool:
     lower = line.lower()
     if "data-login-state-token" in lower:
+        return True
+    if "challenge" in lower and "navigator.credentials" in lower:
+        return True
+    if "challenge" in lower and ("publickey" in lower or "webauthn" in lower):
+        return True
+    if "challengetoken" in lower and ("bootstrap" in lower or "window." in lower):
         return True
     if "name=\"csrf_token\"" in lower or "name='csrf_token'" in lower:
         return True
@@ -385,25 +407,96 @@ def _is_constant_string_expr(node: ast.AST) -> bool:
     return False
 
 
-def _classify_sqlalchemy_text_call(node: ast.Call) -> str:
+def _collect_string_assignments(tree: ast.AST) -> dict[str, ast.AST]:
+    assignments: dict[str, ast.AST] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assignments[target.id] = node.value
+    return assignments
+
+
+def _is_constant_string_expr_with_assignments(node: ast.AST, assignments: dict[str, ast.AST], depth: int = 0) -> bool:
+    if depth > 4:
+        return False
+    if _is_constant_string_expr(node):
+        return True
+    if isinstance(node, ast.Name):
+        value = assignments.get(node.id)
+        if value is None:
+            return False
+        return _is_constant_string_expr_with_assignments(value, assignments, depth + 1)
+    return False
+
+
+def _is_name_local_function_param(name: str, func_node: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
+    if func_node is None:
+        return False
+    positional = [arg.arg for arg in func_node.args.args]
+    positional_only = [arg.arg for arg in func_node.args.posonlyargs]
+    keyword_only = [arg.arg for arg in func_node.args.kwonlyargs]
+    vararg = [func_node.args.vararg.arg] if func_node.args.vararg is not None else []
+    kwarg = [func_node.args.kwarg.arg] if func_node.args.kwarg is not None else []
+    return name in set(positional + positional_only + keyword_only + vararg + kwarg)
+
+
+def _contains_unsafe_name(node: ast.AST, *, func_node: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and _is_name_local_function_param(child.id, func_node):
+            return True
+    return False
+
+
+def _classify_sqlalchemy_text_call(
+    node: ast.Call,
+    *,
+    assignments: dict[str, ast.AST],
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
+) -> str:
     if not node.args:
         return "CONSTANT_LITERAL"
     expr = node.args[0]
     if isinstance(expr, ast.JoinedStr):
-        return "UNSAFE_INTERPOLATED"
+        formatted_nodes = [part.value for part in expr.values if isinstance(part, ast.FormattedValue)]
+        if not formatted_nodes:
+            return "CONSTANT_LITERAL"
+        unresolved_parts: list[ast.AST] = []
+        for part in formatted_nodes:
+            if isinstance(part, ast.Call):
+                symbol = _call_symbol(part).lower()
+                if symbol in _SQL_IDENTIFIER_WRAPPER_CALLS:
+                    unresolved_parts.append(part)
+                    continue
+            if _contains_unsafe_name(part, func_node=func_node):
+                return "UNSAFE_INTERPOLATED"
+            unresolved_parts.append(part)
+        if not unresolved_parts:
+            return "CONSTANT_LITERAL"
+        if all(_is_constant_string_expr_with_assignments(part, assignments) for part in unresolved_parts):
+            return "CONSTANT_LITERAL"
+        return "UNKNOWN_COMPLEX"
     if isinstance(expr, ast.BinOp):
         if isinstance(expr.op, ast.Add):
-            return "CONSTANT_LITERAL" if _is_constant_string_expr(expr) else "UNSAFE_INTERPOLATED"
+            if _is_constant_string_expr_with_assignments(expr, assignments):
+                return "CONSTANT_LITERAL"
+            if _contains_unsafe_name(expr, func_node=func_node):
+                return "UNSAFE_INTERPOLATED"
+            return "UNKNOWN_COMPLEX"
         if isinstance(expr.op, ast.Mod):
-            return "UNSAFE_INTERPOLATED"
+            return "UNSAFE_INTERPOLATED" if _contains_unsafe_name(expr, func_node=func_node) else "UNKNOWN_COMPLEX"
     if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
-        return "UNSAFE_INTERPOLATED"
+        return "UNSAFE_INTERPOLATED" if _contains_unsafe_name(expr, func_node=func_node) else "UNKNOWN_COMPLEX"
+    if isinstance(expr, ast.Name):
+        if _is_constant_string_expr_with_assignments(expr, assignments):
+            return "CONSTANT_LITERAL"
+        return "UNKNOWN_COMPLEX"
     if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
         value = expr.value
         if re.search(r":[a-zA-Z_][a-zA-Z0-9_]*", value):
             return "SAFE_BOUND"
         return "CONSTANT_LITERAL"
-    return "CONSTANT_LITERAL"
+    return "UNKNOWN_COMPLEX"
 
 
 def _is_capability_issuer_call(node: ast.AST) -> bool:
@@ -511,7 +604,20 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
     except SyntaxError:
         return findings
     source_lines = text.splitlines()
+    assignments = _collect_string_assignments(tree)
+    parent_map: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parent_map[child] = parent
     sqlalchemy_text_symbols, sqlalchemy_module_symbols = _sqlalchemy_import_context(tree)
+
+    def _enclosing_function(node: ast.AST) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        current = parent_map.get(node)
+        while current is not None:
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return current
+            current = parent_map.get(current)
+        return None
 
     issued_vars: set[str] = set()
     issued_or_alias: set[str] = set()
@@ -722,7 +828,11 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                     )
         if isinstance(node, ast.Call):
             if _is_resolved_sqlalchemy_text_call(node, sqlalchemy_text_symbols, sqlalchemy_module_symbols):
-                classification = _classify_sqlalchemy_text_call(node)
+                classification = _classify_sqlalchemy_text_call(
+                    node,
+                    assignments=assignments,
+                    func_node=_enclosing_function(node),
+                )
                 if classification == "UNSAFE_INTERPOLATED":
                     findings.append(
                         {
@@ -733,6 +843,19 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                             "message": "sqlalchemy.text() uses interpolated SQL construction; use bound parameters.",
                             "confidence": "probable",
                             "score": 4,
+                            "classification": classification,
+                        }
+                    )
+                elif classification == "UNKNOWN_COMPLEX":
+                    findings.append(
+                        {
+                            "type": _SQL_TEXT_REVIEW_FINDING_TYPE,
+                            "rule_id": _SQL_TEXT_REVIEW_RULE_ID,
+                            "file": rel,
+                            "line": node.lineno,
+                            "message": "sqlalchemy.text() query shape is dynamic and could not be proven safe; review construction and parameter binding.",
+                            "confidence": "weak",
+                            "score": 1,
                             "classification": classification,
                         }
                     )

@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
-from ..domain.models import Finding
+from ..domain.models import Category, Finding, Language
 from ..domain.models import Severity
 from .base import ScannerParser
+from .base import normalize_finding_path
 from .formats.json_parser import parse_json_document, require_list, require_object, require_string
 from .secrets_parser_common import _secret_finding
 
@@ -31,6 +32,24 @@ class SecretsHeuristicParser(ScannerParser):
             line = entry.get("line")
             if not isinstance(line, int):
                 line = None
+            if finding_type == "sqlalchemy_text_review_required":
+                findings.append(
+                    Finding(
+                        tool="secrets_heuristic",
+                        rule_id="sqlalchemy_text_review_required",
+                        severity=Severity.low,
+                        category=Category.lint,
+                        language=Language.python,
+                        file=normalize_finding_path(file_value, project_path, raw_payload=dict(entry)),
+                        line=line,
+                        column=None,
+                        message=message,
+                        confidence=0.35,
+                        tags=["heuristic", "sqlalchemy", "review_required"],
+                        raw_payload={**entry, "confidence": confidence},
+                    )
+                )
+                continue
             severity = Severity.medium
             if finding_type == "probable_secret_exposure":
                 severity = Severity.high

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import pytest
 
 from codegauge.scanners.secrets_heuristic_scanner import SecretsHeuristicScanner
 
@@ -197,6 +198,52 @@ def test_login_template_state_token_and_csrf_hidden_input_not_flagged(tmp_path: 
     assert payload["findings"] == []
 
 
+def test_js_challenge_token_bootstrap_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp5"
+    project.mkdir()
+    (project / "bootstrap.js").write_text(
+        "window.bootstrap = window.bootstrap || {};\n"
+        "window.bootstrap.challengeToken = payload.challengeToken;\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_jsx_hidden_csrf_and_login_state_token_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp6"
+    project.mkdir()
+    (project / "Login.jsx").write_text(
+        "export function Login({ login_state_token, csrf_token }) {\n"
+        "  return (\n"
+        "    <form method=\"post\">\n"
+        "      <input type=\"hidden\" name=\"csrf_token\" value={csrf_token} />\n"
+        "      <input type=\"hidden\" name=\"login_state_token\" value={login_state_token} />\n"
+        "    </form>\n"
+        "  );\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
+def test_tsx_webauthn_challenge_assignment_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp7"
+    project.mkdir()
+    (project / "Passkey.tsx").write_text(
+        "export async function begin(payload: { challengeToken: string }) {\n"
+        "  const publicKey: PublicKeyCredentialRequestOptions = {\n"
+        "    challenge: payload.challengeToken as unknown as ArrayBuffer,\n"
+        "  };\n"
+        "  return navigator.credentials.get({ publicKey });\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
 def test_internal_auth_session_response_leak_still_flagged(tmp_path: Path) -> None:
     project = tmp_path / "repo_fp4"
     project.mkdir()
@@ -207,6 +254,44 @@ def test_internal_auth_session_response_leak_still_flagged(tmp_path: Path) -> No
     )
     payload = _run(SecretsHeuristicScanner(), project)
     assert any(item["type"] == "probable_secret_exposure" and "response leak" in item["message"] for item in payload["findings"])
+
+
+def test_python_challenge_token_response_leak_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp8"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        "def leak(challenge_token):\n"
+        "    return {'challenge_token': challenge_token}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "probable_secret_exposure" and "response leak" in item["message"] for item in payload["findings"])
+
+
+def test_python_challenge_token_logging_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp9"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        "def leak(logger, challenge_token):\n"
+        "    logger.info(challenge_token)\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "probable_secret_exposure" and "sink call" in item["message"] for item in payload["findings"])
+
+
+def test_python_challenge_token_query_transport_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp10"
+    project.mkdir()
+    (project / "auth.py").write_text(
+        "import secrets\n"
+        "def route():\n"
+        "    challenge_token = secrets.token_urlsafe(16)\n"
+        "    return RedirectResponse(url=f\"/verify?challenge_token={challenge_token}\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
 
 
 def test_python_parameter_and_attribute_names_not_flagged(tmp_path: Path) -> None:
@@ -502,3 +587,164 @@ def test_sqlalchemy_module_alias_text_fstring_is_flagged(tmp_path: Path) -> None
     payload = _run(SecretsHeuristicScanner(), project)
     finding = next(item for item in payload["findings"] if item["type"] == "unsafe_dynamic_sql_construction")
     assert finding["classification"] == "UNSAFE_INTERPOLATED"
+
+
+@pytest.mark.parametrize(
+    ("name", "snippet", "expected_security", "expected_review"),
+    [
+        pytest.param(
+            "memexa_sqlite_code_repository_34",
+            "from sqlalchemy import text\n"
+            "def q(q, language, params, conn):\n"
+            "    where = ['1=1']\n"
+            "    if q:\n"
+            "        where.append('name = :q')\n"
+            "    if language:\n"
+            "        where.append('lang = :language')\n"
+            "    return conn.execute(text(f\"SELECT * FROM t WHERE {' AND '.join(where)}\"), params)\n",
+            False,
+            True,
+            id="memexa_sqlite_code_repository_34",
+        ),
+        pytest.param(
+            "memexa_sqlite_search_repository_361",
+            "from sqlalchemy import text\n"
+            "def q(clauses, conn, params):\n"
+            "    where_sql = ' AND '.join(clauses)\n"
+            "    return conn.execute(text(f\"SELECT COUNT(*) FROM t WHERE {where_sql}\"), params)\n",
+            False,
+            True,
+            id="memexa_sqlite_search_repository_361",
+        ),
+        pytest.param(
+            "memexa_rate_limit_87",
+            "from sqlalchemy import text\n"
+            "def q(normalized, conn, params):\n"
+            "    placeholders = ', '.join(f':id_{idx}' for idx in range(len(normalized)))\n"
+            "    return conn.execute(text(f\"SELECT COUNT(*) FROM x WHERE identifier IN ({placeholders})\"), params)\n",
+            False,
+            True,
+            id="memexa_rate_limit_87",
+        ),
+        pytest.param(
+            "memexa_auth_270",
+            "from sqlalchemy import text\n"
+            "def q(conn):\n"
+            "    reset_predicate = 'AND (:reset_cutoff IS NULL OR created_at > :reset_cutoff)'\n"
+            "    return conn.execute(text('SELECT COUNT(*) FROM audit_logs ' + reset_predicate), {})\n",
+            False,
+            True,
+            id="memexa_auth_270",
+        ),
+        pytest.param(
+            "memexa_auth_291",
+            "from sqlalchemy import text\n"
+            "def q(conn):\n"
+            "    reset_predicate = 'AND (:reset_cutoff IS NULL OR created_at > :reset_cutoff)'\n"
+            "    return conn.execute(text('SELECT COUNT(*) FROM alerts ' + reset_predicate), {})\n",
+            False,
+            True,
+            id="memexa_auth_291",
+        ),
+        pytest.param(
+            "memexa_auth_369",
+            "from sqlalchemy import text\n"
+            "def q(conn):\n"
+            "    reset_predicate = 'AND (:reset_cutoff IS NULL OR created_at > :reset_cutoff)'\n"
+            "    return conn.execute(text('SELECT COUNT(*) FROM recent ' + reset_predicate), {})\n",
+            False,
+            True,
+            id="memexa_auth_369",
+        ),
+        pytest.param(
+            "memexa_auth_393",
+            "from sqlalchemy import text\n"
+            "def q(conn):\n"
+            "    reset_predicate = 'AND (:reset_cutoff IS NULL OR created_at > :reset_cutoff)'\n"
+            "    return conn.execute(text('SELECT COUNT(*) FROM active ' + reset_predicate), {})\n",
+            False,
+            True,
+            id="memexa_auth_393",
+        ),
+        pytest.param(
+            "memexa_timeline_182",
+            "from sqlalchemy import text\n"
+            "def q(conn):\n"
+            "    return conn.execute(text('SELECT * FROM entries WHERE user_id = :user_id'), {'user_id': 1})\n",
+            False,
+            False,
+            id="memexa_timeline_182",
+        ),
+        pytest.param(
+            "memexa_unlock_login_59",
+            "from sqlalchemy import text\n"
+            "def q(normalized, conn, params):\n"
+            "    placeholders = ', '.join(f':id_{idx}' for idx in range(len(normalized)))\n"
+            "    return conn.execute(text(f\"SELECT COUNT(*) FROM login_attempts WHERE identifier IN ({placeholders})\"), params)\n",
+            False,
+            True,
+            id="memexa_unlock_login_59",
+        ),
+        pytest.param(
+            "memexa_migrate_86",
+            "from sqlalchemy import text\n"
+            "def _quote_ident(x):\n"
+            "    return x\n"
+            "def q(conn, table):\n"
+            "    return conn.execute(text(f\"SELECT COUNT(*) FROM {_quote_ident(table)}\")).scalar_one()\n",
+            False,
+            True,
+            id="memexa_migrate_86",
+        ),
+        pytest.param(
+            "memexa_migrate_96",
+            "from sqlalchemy import text\n"
+            "def _quote_ident(x):\n"
+            "    return x\n"
+            "def q(conn, table, id_column):\n"
+            "    return conn.execute(text(f\"SELECT COALESCE(MAX({_quote_ident(id_column)}), 0) FROM {_quote_ident(table)}\")).scalar_one()\n",
+            False,
+            True,
+            id="memexa_migrate_96",
+        ),
+        pytest.param(
+            "memexa_migrate_150",
+            "from sqlalchemy import text\n"
+            "def _quote_ident(x):\n"
+            "    return x\n"
+            "def q(table):\n"
+            "    col_expr = 'id, name'\n"
+            "    return text(f\"SELECT {col_expr} FROM {_quote_ident(table)}\")\n",
+            False,
+            True,
+            id="memexa_migrate_150",
+        ),
+        pytest.param(
+            "memexa_migrate_151",
+            "from sqlalchemy import text\n"
+            "def _quote_ident(x):\n"
+            "    return x\n"
+            "def q(table):\n"
+            "    col_expr = 'id, name'\n"
+            "    return text(f\"INSERT INTO {_quote_ident(table)} ({col_expr}) VALUES (:id, :name)\")\n",
+            False,
+            True,
+            id="memexa_migrate_151",
+        ),
+    ],
+)
+def test_memexa_sqlalchemy_examples_classification(
+    tmp_path: Path,
+    name: str,
+    snippet: str,
+    expected_security: bool,
+    expected_review: bool,
+) -> None:
+    project = tmp_path / name
+    project.mkdir()
+    (project / "app.py").write_text(snippet, encoding="utf-8")
+    payload = _run(SecretsHeuristicScanner(), project)
+    has_security = any(item["type"] == "unsafe_dynamic_sql_construction" for item in payload["findings"])
+    has_review = any(item["type"] == "sqlalchemy_text_review_required" for item in payload["findings"])
+    assert has_security is expected_security
+    assert has_review is expected_review
