@@ -51,8 +51,6 @@ _EXCLUDED_VARIABLE_NAMES = {
     "credential_blob",
     "secret_length",
     "min_password_length",
-    "login_state_token",
-    "challenge_token",
 }
 
 _ALLOWLIST_VARIABLE_NAMES = {
@@ -210,6 +208,23 @@ def _is_doc_or_fixture_context(rel: str) -> bool:
     if rel_lower.endswith((".yaml", ".yml")) and "example" in rel_lower:
         return True
     return False
+
+
+def _is_intentional_frontend_token_pattern(line: str) -> bool:
+    lower = line.lower()
+    if "data-login-state-token" in lower:
+        return True
+    if "name=\"csrf_token\"" in lower or "name='csrf_token'" in lower:
+        return True
+    if "getelementbyid('totp-secret')" in lower or 'getelementbyid("totp-secret")' in lower:
+        return True
+    if "payload.secret" in lower and ".textcontent" in lower:
+        return True
+    return False
+
+
+def _is_frontend_context_file(rel_lower: str) -> bool:
+    return rel_lower.endswith((".html", ".jinja", ".jinja2", ".j2", ".js"))
 
 
 def _severity_from_entry(entry_text: str) -> tuple[str, str]:
@@ -874,6 +889,9 @@ class SecretsHeuristicScanner(Scanner):
                         }
                     )
                 else:
+                    if _is_frontend_context_file(rel_lower) and _is_intentional_frontend_token_pattern(line):
+                        telemetry["noise_dropped"] += 1
+                        continue
                     match = _ASSIGNMENT_RE.search(line) or _TOKEN_ASSIGNMENT_RE.search(line)
                     if match is not None:
                         telemetry["candidates_seen"] += 1

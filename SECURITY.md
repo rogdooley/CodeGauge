@@ -27,6 +27,18 @@ History freshness uses three states:
 - Verified/real secret and private key findings are treated as hard security failures.
 - Probable findings remain visible and policy-warned for triage.
 
+## Intentional Security Material Exclusions
+
+The secrets heuristic intentionally suppresses benign security constructs when context demonstrates expected use:
+
+- CSRF hidden inputs
+- TOTP enrollment bootstrap material
+- login challenge/state tokens
+- opaque flash identifiers
+- signed pagination cursors (non-capability)
+
+Suppression requires contextual evidence. Variable names alone are never sufficient.
+
 ## Disclosure
 
 Report security issues privately through the project maintainer contact channel before public disclosure.
