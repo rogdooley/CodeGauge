@@ -124,6 +124,8 @@ _NON_FINDING_PARAM_NORMALIZED = {
     "flash_id",
     "nonce_id",
 }
+_SQL_TEXT_FINDING_TYPE = "unsafe_dynamic_sql_construction"
+_SQL_TEXT_RULE_ID = "PY.SQLA.TEXT.UNSAFE_INTERPOLATED"
 
 
 def _normalize_name(name: str) -> str:
@@ -340,6 +342,40 @@ def _call_symbol(node: ast.AST) -> str:
     if isinstance(node, ast.Call):
         return _call_name(node)
     return ""
+
+
+def _is_sqlalchemy_text_call(node: ast.Call) -> bool:
+    symbol = _call_name(node).lower()
+    return symbol == "text" or symbol.endswith(".text")
+
+
+def _is_constant_string_expr(node: ast.AST) -> bool:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _is_constant_string_expr(node.left) and _is_constant_string_expr(node.right)
+    return False
+
+
+def _classify_sqlalchemy_text_call(node: ast.Call) -> str:
+    if not node.args:
+        return "CONSTANT_LITERAL"
+    expr = node.args[0]
+    if isinstance(expr, ast.JoinedStr):
+        return "UNSAFE_INTERPOLATED"
+    if isinstance(expr, ast.BinOp):
+        if isinstance(expr.op, ast.Add):
+            return "CONSTANT_LITERAL" if _is_constant_string_expr(expr) else "UNSAFE_INTERPOLATED"
+        if isinstance(expr.op, ast.Mod):
+            return "UNSAFE_INTERPOLATED"
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
+        return "UNSAFE_INTERPOLATED"
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        value = expr.value
+        if re.search(r":[a-zA-Z_][a-zA-Z0-9_]*", value):
+            return "SAFE_BOUND"
+        return "CONSTANT_LITERAL"
+    return "CONSTANT_LITERAL"
 
 
 def _is_capability_issuer_call(node: ast.AST) -> bool:
@@ -656,6 +692,21 @@ def _python_findings(rel: str, rel_lower: str, text: str) -> list[dict[str, obje
                         }
                     )
         if isinstance(node, ast.Call):
+            if _is_sqlalchemy_text_call(node):
+                classification = _classify_sqlalchemy_text_call(node)
+                if classification == "UNSAFE_INTERPOLATED":
+                    findings.append(
+                        {
+                            "type": _SQL_TEXT_FINDING_TYPE,
+                            "rule_id": _SQL_TEXT_RULE_ID,
+                            "file": rel,
+                            "line": node.lineno,
+                            "message": "sqlalchemy.text() uses interpolated SQL construction; use bound parameters.",
+                            "confidence": "probable",
+                            "score": 4,
+                            "classification": classification,
+                        }
+                    )
             call_name = _call_name(node)
             sink_match = call_name == "print" or call_name.startswith("logger.") or call_name in {"json.dump", "json.dumps"}
             if sink_match:

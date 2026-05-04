@@ -25,15 +25,15 @@ templates = list(root.rglob("templates/**/*.html"))
 findings = []
 autoescape_re = re.compile(r"{%\\s*autoescape\\s+off\\s*%}", re.I)
 form_re = re.compile(r"<form\\b(?P<attrs>[^>]*)>(?P<body>.*?)</form\\s*>", re.I | re.S)
-method_re = re.compile(r"\\bmethod\\s*=\\s*([\"'])?\\s*(?P<method>[a-zA-Z]+)\\s*\\1", re.I)
+method_re = re.compile(r"\\bmethod\\s*=\\s*([\\\"'])?\\s*(?P<method>[a-zA-Z]+)\\s*\\1", re.I)
 csrf_evidence_res = [
     re.compile(r"{%\\s*csrf_token\\s*%}", re.I),
     re.compile(r"{{\\s*csrf_token\\s*}}", re.I),
     re.compile(r"{{\\s*csrf_input\\s*\\(\\s*\\)\\s*}}", re.I),
-    re.compile(r"<input[^>]*type\\s*=\\s*([\"'])hidden\\1[^>]*name\\s*=\\s*([\"'])csrf_token\\2", re.I),
-    re.compile(r"<input[^>]*name\\s*=\\s*([\"'])csrf_token\\1[^>]*type\\s*=\\s*([\"'])hidden\\2", re.I),
-    re.compile(r"{%\\s*include\\s+[\"'][^\"']*csrf[^\"']*[\"']", re.I),
-    re.compile(r"{%\\s*from\\s+[\"'][^\"']+[\"']\\s+import\\s+[^%]*csrf", re.I),
+    re.compile(r"<input[^>]*type\\s*=\\s*([\\\"'])hidden\\1[^>]*name\\s*=\\s*([\\\"'])csrf_token\\2", re.I),
+    re.compile(r"<input[^>]*name\\s*=\\s*([\\\"'])csrf_token\\1[^>]*type\\s*=\\s*([\\\"'])hidden\\2", re.I),
+    re.compile(r"{%\\s*include\\s+[\\\"'][^\\\"']*csrf[^\\\"']*[\\\"']", re.I),
+    re.compile(r"{%\\s*from\\s+[\\\"'][^\\\"']+[\\\"']\\s+import\\s+[^%]*csrf", re.I),
     re.compile(r"{{[^}]*csrf[^}]*\\(\\s*\\)\\s*}}", re.I),
 ]
 

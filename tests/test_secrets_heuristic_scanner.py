@@ -387,3 +387,90 @@ def test_memexa_admin_created_helper_url_then_redirectresponse(tmp_path: Path) -
     )
     payload = _run(SecretsHeuristicScanner(), project)
     assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_sqlalchemy_text_fstring_is_flagged_as_unsafe_interpolated(tmp_path: Path) -> None:
+    project = tmp_path / "repo23"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(x):\n"
+        "    stmt = text(f\"select * from users where id = {x}\")\n"
+        "    return stmt\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(item for item in payload["findings"] if item["type"] == "unsafe_dynamic_sql_construction")
+    assert finding["classification"] == "UNSAFE_INTERPOLATED"
+
+
+def test_sqlalchemy_text_concat_is_flagged_as_unsafe_interpolated(tmp_path: Path) -> None:
+    project = tmp_path / "repo24"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(user_input):\n"
+        "    stmt = text(\"select * from users where name = '\" + user_input + \"'\")\n"
+        "    return stmt\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(item for item in payload["findings"] if item["type"] == "unsafe_dynamic_sql_construction")
+    assert finding["classification"] == "UNSAFE_INTERPOLATED"
+
+
+def test_sqlalchemy_text_percent_format_is_flagged_as_unsafe_interpolated(tmp_path: Path) -> None:
+    project = tmp_path / "repo25"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(x):\n"
+        "    stmt = text(\"select * from users where id = %s\" % x)\n"
+        "    return stmt\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(item for item in payload["findings"] if item["type"] == "unsafe_dynamic_sql_construction")
+    assert finding["classification"] == "UNSAFE_INTERPOLATED"
+
+
+def test_sqlalchemy_text_dot_format_is_flagged_as_unsafe_interpolated(tmp_path: Path) -> None:
+    project = tmp_path / "repo26"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(x):\n"
+        "    stmt = text(\"select * from users where id = {}\".format(x))\n"
+        "    return stmt\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    finding = next(item for item in payload["findings"] if item["type"] == "unsafe_dynamic_sql_construction")
+    assert finding["classification"] == "UNSAFE_INTERPOLATED"
+
+
+def test_sqlalchemy_text_bound_parameter_is_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo27"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q(x, conn):\n"
+        "    stmt = text(\"select * from users where id=:id\")\n"
+        "    return conn.execute(stmt, {\"id\": x})\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert not any(item["type"] == "unsafe_dynamic_sql_construction" for item in payload["findings"])
+
+
+def test_sqlalchemy_text_constant_literal_is_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo28"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "from sqlalchemy import text\n"
+        "def q():\n"
+        "    return text(\"select 1\")\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert not any(item["type"] == "unsafe_dynamic_sql_construction" for item in payload["findings"])
