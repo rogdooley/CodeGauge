@@ -255,6 +255,31 @@ def _is_frontend_context_file(rel_lower: str) -> bool:
     return rel_lower.endswith((".html", ".jinja", ".jinja2", ".j2", ".js"))
 
 
+def _is_frontend_js_context_file(rel_lower: str) -> bool:
+    return rel_lower.endswith((".js", ".jsx", ".ts", ".tsx"))
+
+
+def _is_frontend_webauthn_challenge_assignment(
+    *,
+    rel_lower: str,
+    variable_name: str,
+    lines: list[str],
+    line_index: int,
+) -> bool:
+    if not _is_frontend_js_context_file(rel_lower):
+        return False
+    normalized = _normalize_name(variable_name)
+    if normalized not in {"challenge_token", "challengetoken"}:
+        return False
+    start = max(0, line_index - 4)
+    end = min(len(lines), line_index + 3)
+    context = " ".join(line.lower() for line in lines[start:end])
+    explicit_terms = ("navigator.credentials", "publickeycredential", "passkey", "webauthn")
+    if any(term in context for term in explicit_terms):
+        return True
+    return "credential" in context and "challenge" in context
+
+
 def _severity_from_entry(entry_text: str) -> tuple[str, str]:
     text = entry_text.lower()
     high_terms = ("ttl>7d", "ttl > 7", "30 day", "unlimited use", "multi-use", "non-revocable", "admin invite", "privileged", "telemetry", "full url logging")
@@ -1133,8 +1158,9 @@ class SecretsHeuristicScanner(Scanner):
                 text = file_path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
+            lines = text.splitlines()
             if rel_lower.endswith(".py"):
-                for line in text.splitlines():
+                for line in lines:
                     match = _ASSIGNMENT_RE.search(line) or _TOKEN_ASSIGNMENT_RE.search(line)
                     if match is None:
                         continue
@@ -1155,7 +1181,7 @@ class SecretsHeuristicScanner(Scanner):
                     telemetry["candidates_seen"] += 1
                     telemetry["probable"] += 1
                     findings.append(finding)
-            for idx, line in enumerate(text.splitlines(), start=1):
+            for idx, line in enumerate(lines, start=1):
                 if _KEY_LINE_RE.search(line):
                     telemetry["candidates_seen"] += 1
                     telemetry["probable"] += 1
@@ -1219,6 +1245,14 @@ class SecretsHeuristicScanner(Scanner):
                         telemetry["candidates_seen"] += 1
                         variable_name = match.group(1)
                         literal_value = match.group(2)
+                        if _is_frontend_webauthn_challenge_assignment(
+                            rel_lower=rel_lower,
+                            variable_name=variable_name,
+                            lines=lines,
+                            line_index=idx - 1,
+                        ):
+                            telemetry["noise_dropped"] += 1
+                            continue
                         if _is_example_file(rel_lower) and _is_placeholder(literal_value):
                             telemetry["noise_dropped"] += 1
                             continue

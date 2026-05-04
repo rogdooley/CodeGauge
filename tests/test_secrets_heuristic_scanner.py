@@ -210,6 +210,21 @@ def test_js_challenge_token_bootstrap_not_flagged(tmp_path: Path) -> None:
     assert payload["findings"] == []
 
 
+def test_passkeys_js_challenge_token_assignment_not_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp13"
+    project.mkdir()
+    (project / "passkeys.js").write_text(
+        "async function beginPasskey(payload) {\n"
+        "  const challenge_token = payload.challengeToken;\n"
+        "  const publicKey = { challenge: challenge_token };\n"
+        "  return navigator.credentials.get({ publicKey });\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert payload["findings"] == []
+
+
 def test_jsx_hidden_csrf_and_login_state_token_not_flagged(tmp_path: Path) -> None:
     project = tmp_path / "repo_fp6"
     project.mkdir()
@@ -320,6 +335,18 @@ def test_backend_redirectresponse_challenge_token_query_transport_is_flagged(tmp
     )
     payload = _run(SecretsHeuristicScanner(), project)
     assert any(item["type"] == "intentional_bearer_issuance_url_transport" for item in payload["findings"])
+
+
+def test_unrelated_js_challenge_token_assignment_outside_webauthn_still_flagged(tmp_path: Path) -> None:
+    project = tmp_path / "repo_fp14"
+    project.mkdir()
+    (project / "token.js").write_text(
+        "challenge_token = 'AKIA1234567890ABCDEF';\n"
+        "console.log(challenge_token);\n",
+        encoding="utf-8",
+    )
+    payload = _run(SecretsHeuristicScanner(), project)
+    assert any(item["type"] == "probable_secret_exposure" for item in payload["findings"])
 
 
 def test_python_parameter_and_attribute_names_not_flagged(tmp_path: Path) -> None:
