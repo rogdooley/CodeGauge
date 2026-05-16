@@ -60,6 +60,24 @@ Sample report path:
 
 `~/Documents/CodeGauge/index.html`
 
+## Screenshots
+
+### Main Page
+
+![CodeGauge main page](images/main-page.png)
+
+### Project Page
+
+![CodeGauge project page](images/project-page-report-last-run.png)
+
+### Report Page
+
+![CodeGauge report page](images/project-page-report.png)
+
+### Details Page
+
+![CodeGauge details page](images/project-page-report-details.png)
+
 ## Why Deterministic Analysis
 
 - Stable scope and finding ordering.
