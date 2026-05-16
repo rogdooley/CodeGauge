@@ -33,4 +33,9 @@ hypothesis/
 
 .codegauge/
 .codegauge.toml
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 11b4df9 (ignore .DS_Store)
 .DS_Store
