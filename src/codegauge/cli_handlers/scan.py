@@ -13,6 +13,7 @@ import typer
 from ..baseline import BaselineService
 from ..config import ConfigLoadError
 from ..constants import ExitCode, InternalErrorCode
+from ..discovery import has_recognized_config_marker
 from ..policy import CodeGaugePolicyEngine
 from ..reporting import StaticSiteBuilder
 from ..scoring import CodeGaugeScoringEngine
@@ -21,53 +22,6 @@ from ..services.recommendation_engine import RecommendationEngine, strip_interna
 from ..services.report_normalizer import FINGERPRINT_VERSION, MESSAGE_NORMALIZER_VERSION, finding_sort_key, normalize_finding_record
 from ..services.security_classifier import SecurityFindingClassifier
 from ..storage import ScanArtifactStore
-
-
-_PROJECT_MANAGED_CONFIG_EXACT = (
-    # Python
-    "pyproject.toml",
-    "ruff.toml",
-    ".ruff.toml",
-    "pyrightconfig.json",
-    ".bandit",
-    "setup.cfg",
-    "tox.ini",
-    # JavaScript / TypeScript
-    "eslint.config.js",
-    "eslint.config.cjs",
-    "eslint.config.mjs",
-    "eslint.config.ts",
-    "tsconfig.json",
-    # Java
-    "pom.xml",
-    "build.gradle",
-    "build.gradle.kts",
-    "checkstyle.xml",
-    "spotbugs-exclude.xml",
-    # PHP
-    "phpstan.neon",
-    "phpstan.neon.dist",
-    "psalm.xml",
-    "composer.json",
-    # Go
-    "go.mod",
-    ".golangci.yml",
-    ".golangci.yaml",
-)
-
-_PROJECT_MANAGED_CONFIG_GLOBS = (
-    ".eslintrc*",
-)
-
-
-def _has_recognized_project_config(project_root: Path) -> bool:
-    for config_name in _PROJECT_MANAGED_CONFIG_EXACT:
-        if (project_root / config_name).exists():
-            return True
-    for pattern in _PROJECT_MANAGED_CONFIG_GLOBS:
-        if any(project_root.glob(pattern)):
-            return True
-    return False
 
 
 def _should_emit_bootstrap_tip(*, project_root: Path, disable_bootstrap_hints: bool, json_output: bool) -> bool:
@@ -83,7 +37,7 @@ def _should_emit_bootstrap_tip(*, project_root: Path, disable_bootstrap_hints: b
         return False
     if (project_root / ".codegauge.toml").exists():
         return False
-    return not _has_recognized_project_config(project_root)
+    return not has_recognized_config_marker(project_root)
 
 
 def scan_handler(
