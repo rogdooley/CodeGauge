@@ -113,6 +113,12 @@ class SecretsConfig(BaseModel):
     ignored_sensitive_patterns_remove: list[str] = Field(default_factory=list)
 
 
+class UIConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    disable_bootstrap_hints: bool = False
+
+
 class CodeGaugeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +135,7 @@ class CodeGaugeConfig(BaseModel):
     thresholds: ThresholdConfig = Field(default_factory=ThresholdConfig)
     payload: PayloadConfig = Field(default_factory=PayloadConfig)
     secrets: SecretsConfig = Field(default_factory=SecretsConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
 
     @field_validator("enabled_scanners", "disabled_scanners", mode="after")
     @classmethod

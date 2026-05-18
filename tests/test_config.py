@@ -21,6 +21,13 @@ def test_config_loads_defaults_for_project(tmp_path: Path) -> None:
     assert config.secrets.enabled is True
     assert config.secrets.exclude_fixtures is True
     assert config.secrets.fail_on_secret is False
+    assert config.ui.disable_bootstrap_hints is False
+
+
+def test_ui_disable_bootstrap_hints_can_be_set(tmp_path: Path) -> None:
+    (tmp_path / ".codegauge.toml").write_text("[ui]\ndisable_bootstrap_hints = true\n")
+    config = load_config(project_path=tmp_path)
+    assert config.ui.disable_bootstrap_hints is True
 
 
 def test_default_bandit_config_excludes_tests(tmp_path: Path) -> None:

@@ -43,6 +43,73 @@ def test_scan_runs_with_stub_scanners(tmp_path: Path) -> None:
     assert "Java cache:" not in result.stdout
 
 
+def test_scan_shows_init_config_tip_for_unmanaged_project(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_missing_linter_configs"
+    project.mkdir()
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project)])
+    assert result.exit_code == 3
+    assert "no scanner configuration detected in project root" in result.stderr
+    assert "install-scanners.sh --init-config" in result.stderr
+
+
+def test_scan_does_not_show_init_config_tip_when_codegauge_config_exists(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_has_codegauge_config"
+    project.mkdir()
+    (project / ".codegauge.toml").write_text('enabled_scanners = ["ruff"]\n')
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project)])
+    assert "no scanner configuration detected in project root" not in result.stderr
+
+
+def test_scan_does_not_show_init_config_tip_when_recognized_linter_config_exists(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_has_pyproject"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project)])
+    assert "no scanner configuration detected in project root" not in result.stderr
+
+
+def test_scan_does_not_show_init_config_tip_for_json_mode(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_json_no_tip"
+    project.mkdir()
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project), "--json"])
+    assert "no scanner configuration detected in project root" not in result.stderr
+
+
+def test_scan_does_not_show_init_config_tip_in_ci(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_ci_no_tip"
+    project.mkdir()
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project)])
+    assert "no scanner configuration detected in project root" not in result.stderr
+
+
+def test_scan_does_not_show_init_config_tip_in_github_actions(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "proj_gha_no_tip"
+    project.mkdir()
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project)])
+    assert "no scanner configuration detected in project root" not in result.stderr
+
+
+def test_scan_does_not_show_init_config_tip_when_disabled_in_ui_config(tmp_path: Path, monkeypatch) -> None:
+    fake_home = tmp_path / "home"
+    global_cfg = fake_home / ".config" / "CodeGauge" / "config.toml"
+    global_cfg.parent.mkdir(parents=True)
+    global_cfg.write_text("[ui]\ndisable_bootstrap_hints = true\n")
+    monkeypatch.setenv("HOME", str(fake_home))
+    project = tmp_path / "proj_ui_hint_disabled"
+    project.mkdir()
+    monkeypatch.setattr("codegauge.cli_handlers.scan.sys.stderr.isatty", lambda: True)
+    result = runner.invoke(app, ["scan", str(project)])
+    assert "no scanner configuration detected in project root" not in result.stderr
+
+
 def test_scan_human_output_shows_secret_suppression_rate(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "proj_secret"
     project.mkdir()

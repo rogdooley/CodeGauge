@@ -18,6 +18,15 @@ uv sync
 uv run codegauge --help
 ```
 
+Scanner prerequisites and install helper:
+
+```bash
+./install-scanners.sh --help
+./install-scanners.sh --profile core --init-config
+```
+
+See `SCANNER_INSTALL.md` for generic and language-specific setup.
+
 ## Quickstart
 
 ```bash
@@ -25,6 +34,8 @@ uv run codegauge scan .
 uv run codegauge scan . --json
 uv run codegauge secrets scan .
 ```
+
+When scanning an unmanaged local project (no `.codegauge.toml` and no common linter config), CodeGauge shows a bootstrap hint to initialize baseline config files.
 
 ## Secrets Pattern Override (Add/Remove Only)
 

@@ -32,6 +32,7 @@ def _default_config() -> dict[str, Any]:
         "thresholds": {},
         "payload": {},
         "secrets": {},
+        "ui": {},
     }
 
 

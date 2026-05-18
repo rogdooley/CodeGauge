@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
@@ -19,6 +21,69 @@ from ..services.recommendation_engine import RecommendationEngine, strip_interna
 from ..services.report_normalizer import FINGERPRINT_VERSION, MESSAGE_NORMALIZER_VERSION, finding_sort_key, normalize_finding_record
 from ..services.security_classifier import SecurityFindingClassifier
 from ..storage import ScanArtifactStore
+
+
+_PROJECT_MANAGED_CONFIG_EXACT = (
+    # Python
+    "pyproject.toml",
+    "ruff.toml",
+    ".ruff.toml",
+    "pyrightconfig.json",
+    ".bandit",
+    "setup.cfg",
+    "tox.ini",
+    # JavaScript / TypeScript
+    "eslint.config.js",
+    "eslint.config.cjs",
+    "eslint.config.mjs",
+    "eslint.config.ts",
+    "tsconfig.json",
+    # Java
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "checkstyle.xml",
+    "spotbugs-exclude.xml",
+    # PHP
+    "phpstan.neon",
+    "phpstan.neon.dist",
+    "psalm.xml",
+    "composer.json",
+    # Go
+    "go.mod",
+    ".golangci.yml",
+    ".golangci.yaml",
+)
+
+_PROJECT_MANAGED_CONFIG_GLOBS = (
+    ".eslintrc*",
+)
+
+
+def _has_recognized_project_config(project_root: Path) -> bool:
+    for config_name in _PROJECT_MANAGED_CONFIG_EXACT:
+        if (project_root / config_name).exists():
+            return True
+    for pattern in _PROJECT_MANAGED_CONFIG_GLOBS:
+        if any(project_root.glob(pattern)):
+            return True
+    return False
+
+
+def _should_emit_bootstrap_tip(*, project_root: Path, disable_bootstrap_hints: bool, json_output: bool) -> bool:
+    if disable_bootstrap_hints:
+        return False
+    if json_output:
+        return False
+    if str(os.environ.get("CI", "")).lower() in {"1", "true", "yes"}:
+        return False
+    if str(os.environ.get("GITHUB_ACTIONS", "")).lower() in {"1", "true", "yes"}:
+        return False
+    if not sys.stderr.isatty():
+        return False
+    if (project_root / ".codegauge.toml").exists():
+        return False
+    return not _has_recognized_project_config(project_root)
 
 
 def scan_handler(
@@ -70,6 +135,18 @@ def scan_handler(
     if legacy_root.exists():
         typer.echo(
             f"Notice: legacy local storage at {legacy_root} is deprecated; new artifacts are written to {services.config.report_root}",
+            err=True,
+        )
+
+    if _should_emit_bootstrap_tip(
+        project_root=resolved_path,
+        disable_bootstrap_hints=bool(getattr(resolved_config.ui, "disable_bootstrap_hints", False)),
+        json_output=json_output,
+    ):
+        tip = typer.style("Tip", fg=typer.colors.YELLOW, bold=True)
+        cmd = typer.style(f"./install-scanners.sh --init-config --target-dir {resolved_path}", fg=typer.colors.CYAN)
+        typer.echo(
+            f"{tip}: no scanner configuration detected in project root. Run: {cmd}",
             err=True,
         )
 

@@ -33,3 +33,4 @@ hypothesis/
 
 .codegauge/
 .codegauge.toml
+.DS_Store

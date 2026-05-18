@@ -42,3 +42,11 @@ Pattern behavior is additive/subtractive only: built-in defaults are preserved, 
 ## Payload
 
 `[payload]` controls raw payload capture, redaction, and size limits.
+
+## UI
+
+`[ui]` supports onboarding and terminal guidance behavior:
+
+- `disable_bootstrap_hints` (default `false`)
+
+When `false`, `codegauge scan` may show an interactive tip for unmanaged projects (missing `.codegauge.toml` and no recognizable linter/static-analysis config in project root). Hints are suppressed for JSON output, CI environments, and non-interactive terminals.
